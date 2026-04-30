@@ -1,16 +1,27 @@
-# untitled13
+# 📱 Ticket Supporting System - Flutter App
 
-A new Flutter project.
+A mobile application built using Flutter for managing and supporting tickets efficiently. This app allows users to create, track, and manage support tickets in real-time.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## 🚀 Features
 
-A few resources to get you started if this is your first Flutter project:
+- 📝 Create Support Tickets
+- 📊 Track Ticket Status (Open / In Progress / Closed)
+- 👤 User-friendly Interface
+- 🔄 Real-time Updates
+- 📂 Organized Ticket Management
+- 🔐 Secure Data Handling
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🛠️ Tech Stack
+
+- **Frontend:** Flutter (Dart)
+- **Backend:** (Add your backend here - Firebase / Node.js / API)
+- **Database:** (Firestore / MySQL / etc.)
+- **Version Control:** Git & GitHub
+
+---
+
+## 📂 Project Structure
