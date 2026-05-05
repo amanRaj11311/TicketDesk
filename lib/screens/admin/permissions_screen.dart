@@ -2,7 +2,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:provider/provider.dart';
+
 import '../../widgets/menu_drawer.dart';
+import '../../constants/api_constants.dart';
+import '../../providers/theme_provider.dart';
+import '../common/profile_screen.dart';
 
 class PermissionsScreen extends StatefulWidget {
   const PermissionsScreen({super.key});
@@ -12,13 +17,17 @@ class PermissionsScreen extends StatefulWidget {
 }
 
 class _PermissionsScreenState extends State<PermissionsScreen> {
-  final String _baseUrl = "https://ticketapi.dcstechnosis.com";
+  final String _baseUrl = ApiConstants.baseUrl;
   bool _isLoading = true;
 
   // Theme Colors
   final Color primaryYellow = const Color(0xFFF3C300);
   final Color navyBlue = const Color(0xFF1E293B);
-  final Color backgroundGray = const Color(0xFFF8FAFC);
+
+  // APP BAR USER PROFILE DATA
+  String _firstName = "User";
+  String _initials = "U";
+  String? _profileImageUrl;
 
   // Data
   List<dynamic> _roles = [];
@@ -29,17 +38,54 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
   Set<String> _originalRolePerms = {};
   Set<String> _currentRolePerms = {};
 
-  // Matrix Structure
-  final Map<String, Map<String, List<String>>> _gridMap = {};
-
-  // Strict UI Layout Order
-  final List<String> _moduleOrder = ['TICKETS', 'USERS', 'TEAMS', 'ROLES', 'REPORTS', 'SETTINGS'];
-  final List<String> _columnOrder = ['VIEW', 'CREATE', 'EDIT', 'DELETE', 'ASSIGN', 'MANAGE', 'EXPORT'];
+  // 🔥 EXPLICIT PERMISSION MAPPING (Exactly 29 Permissions)
+  final Map<String, List<Map<String, String>>> _permissionModules = {
+    "Ticket": [
+      {"resource": "ticket", "action": "view", "label": "VIEW"},
+      {"resource": "ticket", "action": "view_own", "label": "VIEW OWN"},
+      {"resource": "ticket", "action": "create", "label": "CREATE"},
+      {"resource": "ticket", "action": "update", "label": "UPDATE"},
+      {"resource": "ticket", "action": "delete", "label": "DELETE"},
+      {"resource": "ticket", "action": "assign", "label": "ASSIGN"},
+      {"resource": "ticket", "action": "change_status", "label": "CHANGE STATUS"},
+      {"resource": "ticket", "action": "change_priority", "label": "CHANGE PRIORITY"},
+      {"resource": "ticket", "action": "close", "label": "CLOSE"},
+      {"resource": "ticket", "action": "reopen", "label": "REOPEN"},
+    ],
+    "Comment": [
+      {"resource": "comment", "action": "view", "label": "VIEW"},
+      {"resource": "comment", "action": "create", "label": "CREATE"},
+      {"resource": "comment", "action": "update", "label": "UPDATE"},
+      {"resource": "comment", "action": "delete", "label": "DELETE"},
+    ],
+    "Team": [
+      {"resource": "team", "action": "view", "label": "VIEW"},
+      {"resource": "team", "action": "create", "label": "CREATE"},
+      {"resource": "team", "action": "update", "label": "UPDATE"},
+      {"resource": "team", "action": "delete", "label": "DELETE"},
+    ],
+    "User": [
+      {"resource": "user", "action": "view", "label": "VIEW"},
+      {"resource": "user", "action": "create", "label": "CREATE"},
+      {"resource": "user", "action": "update", "label": "UPDATE"},
+      {"resource": "user", "action": "delete", "label": "DELETE"},
+      {"resource": "user", "action": "assign_role", "label": "ASSIGN ROLE"},
+    ],
+    "Role": [
+      {"resource": "role", "action": "view", "label": "VIEW"},
+      {"resource": "role", "action": "create", "label": "CREATE"},
+      {"resource": "role", "action": "update", "label": "UPDATE"},
+      {"resource": "role", "action": "delete", "label": "DELETE"},
+    ],
+    "Permission": [
+      {"resource": "permission", "action": "view", "label": "VIEW"},
+      {"resource": "permission", "action": "assign", "label": "ASSIGN"},
+    ],
+  };
 
   @override
   void initState() {
     super.initState();
-    _buildDynamicMatrix();
     _fetchData();
   }
 
@@ -48,6 +94,25 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     try {
       const storage = FlutterSecureStorage();
       String? token = await storage.read(key: "jwt_token");
+      String? userDataString = await storage.read(key: "user_data");
+
+      // Set App Bar User Profile
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString);
+        String fullName = userData['name'] ?? 'User';
+        List<String> nameParts = fullName.trim().split(RegExp(r'\s+'));
+        _firstName = nameParts.isNotEmpty ? nameParts.first : 'User';
+
+        if (nameParts.length > 1 && nameParts[1].isNotEmpty) {
+          _initials = nameParts[0][0].toUpperCase() + nameParts[1][0].toUpperCase();
+        } else if (nameParts.isNotEmpty && nameParts[0].isNotEmpty) {
+          _initials = nameParts[0][0].toUpperCase();
+        } else {
+          _initials = "U";
+        }
+        _profileImageUrl = userData['profileImage'] ?? userData['avatar'];
+      }
+
       Options options = Options(headers: {"Authorization": "Bearer $token"});
 
       final responses = await Future.wait([
@@ -68,56 +133,41 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
         _masterPermissions = _getFallbackPermissions();
       }
 
-      _buildDynamicMatrix();
-
-      if (_roles.isNotEmpty && _selectedRoleId == null) {
-        _selectRole(_roles[0]);
+      // Ensure proper selection mapping
+      if (_roles.isNotEmpty) {
+        if (_selectedRoleId != null && _roles.any((r) => (r['_id'] ?? r['id']).toString() == _selectedRoleId)) {
+          var roleToSelect = _roles.firstWhere((r) => (r['_id'] ?? r['id']).toString() == _selectedRoleId);
+          _selectRole(roleToSelect);
+        } else {
+          _selectRole(_roles[0]);
+        }
       }
 
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     } catch (e) {
       if (_masterPermissions.isEmpty) _masterPermissions = _getFallbackPermissions();
-      _buildDynamicMatrix();
-
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       _showError("Failed to load permissions data", e);
     }
   }
 
-  // 🔥 BULLETPROOF ERROR HANDLER
-  // Prevents crashes if the backend sends an HTML error page instead of JSON
   void _showError(String fallbackMsg, dynamic e) {
     String msg = fallbackMsg;
     if (e is DioException) {
       final data = e.response?.data;
-
       if (data is Map) {
         msg = data['message'] ?? data['error'] ?? fallbackMsg;
       } else if (data is String) {
-        // Handle HTML Error Pages
-        if (data.contains("Cannot PUT")) {
-          msg = "Backend Error: Route 'PUT /api/roles/:id' is missing on the server.";
-        } else if (data.contains("Cannot PATCH")) {
-          msg = "Backend Error: Route 'PATCH /api/roles/:id' is missing on the server.";
-        } else if (data.contains("<!DOCTYPE html>")) {
-          msg = "Backend Server Error: Returned an HTML error page.";
+        if (data.contains("<!DOCTYPE html>")) {
+          msg = "API Route Not Found (404). Backend configuration error.";
         } else {
-          msg = data; // Show raw string if it's not HTML
+          msg = data;
         }
       } else {
         msg = e.message ?? fallbackMsg;
       }
     }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(msg, style: const TextStyle(fontWeight: FontWeight.bold)),
-            backgroundColor: Colors.red.shade800,
-            duration: const Duration(seconds: 5),
-          )
-      );
-    }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red.shade800));
   }
 
   Future<String> _getOrganizationId() async {
@@ -130,67 +180,27 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
   }
 
   List<String> _extractPermissions(dynamic role) {
-    if (role == null || role['permissions'] == null) return [];
-    if (role['permissions'] is List) {
-      return (role['permissions'] as List).map((p) {
-        if (p is Map) return (p['_id'] ?? p['id'] ?? '').toString();
-        return p.toString();
-      }).toList();
-    }
-    return [];
+    if (role == null) return [];
+    List<dynamic> permsList = role['permissionIds'] ?? role['permissions'] ?? [];
+    return permsList.map((p) {
+      if (p is Map) return (p['_id'] ?? p['id'] ?? '').toString();
+      return p.toString();
+    }).toList();
   }
 
-  void _buildDynamicMatrix() {
-    _gridMap.clear();
-    for (String m in _moduleOrder) {
-      _gridMap[m] = { for (String c in _columnOrder) c: [] };
-    }
-
-    for (var perm in _masterPermissions) {
-      String id = perm['_id'].toString();
-      String resource = perm['resource'].toString().toLowerCase();
-      String action = perm['action'].toString().toLowerCase();
-
-      String moduleName = _mapResourceToModule(resource);
-      String columnName = _mapActionToColumn(action);
-
-      if (_gridMap.containsKey(moduleName) && _gridMap[moduleName]!.containsKey(columnName)) {
-        _gridMap[moduleName]![columnName]!.add(id);
+  String? _resolvePermissionId(String resource, String action) {
+    for (var p in _masterPermissions) {
+      if (p['resource'] == resource && p['action'] == action) {
+        return (p['_id'] ?? p['id']).toString();
       }
     }
-  }
-
-  String _mapResourceToModule(String resource) {
-    if (['ticket', 'comment', 'attachment'].contains(resource)) return 'TICKETS';
-    if (resource == 'user') return 'USERS';
-    if (resource == 'team') return 'TEAMS';
-    if (['role', 'permission'].contains(resource)) return 'ROLES';
-    if (['report', 'dashboard'].contains(resource)) return 'REPORTS';
-    if (resource == 'settings') return 'SETTINGS';
-    return 'SETTINGS';
-  }
-
-  String _mapActionToColumn(String action) {
-    if (action.contains('view')) return 'VIEW';
-    if (action == 'create' || action == 'upload') return 'CREATE';
-    if (['update', 'change_status', 'change_priority', 'close', 'reopen'].contains(action)) return 'EDIT';
-    if (action == 'delete') return 'DELETE';
-    if (action.contains('assign')) return 'ASSIGN';
-    if (action == 'export') return 'EXPORT';
-    return 'MANAGE';
+    return null;
   }
 
   void _selectRole(dynamic role) {
     setState(() {
       _selectedRoleId = (role['_id'] ?? role['id']).toString();
-      _originalRolePerms = {};
-
-      if (role['permissions'] != null) {
-        for (var p in role['permissions']) {
-          if (p is Map) _originalRolePerms.add((p['_id'] ?? p['id']).toString());
-          else if (p is String) _originalRolePerms.add(p);
-        }
-      }
+      _originalRolePerms = _extractPermissions(role).toSet();
       _currentRolePerms = Set<String>.from(_originalRolePerms);
     });
   }
@@ -200,35 +210,20 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     return !_originalRolePerms.containsAll(_currentRolePerms);
   }
 
-  void _togglePermission(List<String> permIdsToToggle) {
-    if (permIdsToToggle.isEmpty) return;
-    setState(() {
-      bool allChecked = permIdsToToggle.every((id) => _currentRolePerms.contains(id));
-      if (allChecked) {
-        _currentRolePerms.removeAll(permIdsToToggle);
-      } else {
-        _currentRolePerms.addAll(permIdsToToggle);
-      }
-    });
-  }
-
   void _toggleModuleRow(String moduleName) {
     setState(() {
-      List<String> allIdsInModule = [];
-      Map<String, List<String>>? cols = _gridMap[moduleName];
-
-      if (cols != null) {
-        for (List<String> colList in cols.values) {
-          allIdsInModule.addAll(colList);
-        }
+      List<String> validIds = [];
+      for (var p in _permissionModules[moduleName]!) {
+        String? id = _resolvePermissionId(p['resource']!, p['action']!);
+        if (id != null) validIds.add(id);
       }
-      if (allIdsInModule.isEmpty) return;
+      if (validIds.isEmpty) return;
 
-      bool allChecked = allIdsInModule.every((id) => _currentRolePerms.contains(id));
+      bool allChecked = validIds.every((id) => _currentRolePerms.contains(id));
       if (allChecked) {
-        _currentRolePerms.removeAll(allIdsInModule);
+        _currentRolePerms.removeAll(validIds);
       } else {
-        _currentRolePerms.addAll(allIdsInModule);
+        _currentRolePerms.addAll(validIds);
       }
     });
   }
@@ -244,83 +239,142 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
       var role = _roles.firstWhere((r) => (r['_id'] ?? r['id']).toString() == _selectedRoleId);
 
+      Options jsonOptions = Options(
+          headers: {
+            "Authorization": "Bearer $token",
+            "Content-Type": "application/json"
+          }
+      );
+
       Map<String, dynamic> payload = {
         "name": role['name'],
         "description": role['description'] ?? "",
-        "permissions": _currentRolePerms.toList(),
+        "permissionIds": _currentRolePerms.toList(),
         "organizationId": orgId,
         "roleId": _selectedRoleId,
       };
 
       await Dio().put(
-          "$_baseUrl/api/roles/$_selectedRoleId",
-          data: payload,
-          options: Options(headers: {"Authorization": "Bearer $token"})
+          "$_baseUrl/api/roles/update",
+          data: jsonEncode(payload),
+          options: jsonOptions
       );
 
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Permissions saved successfully!"), backgroundColor: Colors.green));
       _fetchData();
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       _showError("Error saving permissions", e);
     }
+  }
+
+  // =========================================================================
+  // 🔥 APP BAR WITH AVATAR & DARK MODE
+  // =========================================================================
+  PreferredSizeWidget _buildModernAppBar() {
+    return AppBar(
+      backgroundColor: navyBlue,
+      elevation: 0,
+      iconTheme: const IconThemeData(color: Colors.white),
+      title: const Text("Permissions Mapping", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+      actions: [
+        // IconButton(icon: const Icon(Icons.notifications_none, color: Colors.white), onPressed: () {}),
+        _buildAvatarMenu(),
+      ],
+    );
+  }
+
+  Widget _buildAvatarMenu() {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+
+    return PopupMenuButton<String>(
+      onSelected: (val) {
+        if (val == 'profile') Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())).then((_) => _fetchData());
+        if (val == 'theme') themeProvider.toggleTheme();
+      },
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: 'profile', child: Row(children: [Icon(Icons.person_outline, size: 20), SizedBox(width: 10), Text("Profile")])),
+        PopupMenuItem(
+          value: 'theme',
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(children: [Icon(themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode, size: 20), const SizedBox(width: 10), const Text("Dark Mode")]),
+            ],
+          ),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.only(right: 12, left: 4),
+        child: CircleAvatar(
+          radius: 16,
+          backgroundColor: primaryYellow,
+          backgroundImage: _profileImageUrl != null ? NetworkImage("$_baseUrl$_profileImageUrl") : null,
+          child: _profileImageUrl == null ? Text(_initials, style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)) : null,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     bool hasChanges = _hasUnsavedChanges();
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode;
+
+    final bgColor = isDark ? const Color(0xFF121212) : const Color(0xFFF8FAFC);
+    final textColor = isDark ? Colors.white : navyBlue;
 
     return Scaffold(
-      backgroundColor: backgroundGray,
+      backgroundColor: bgColor,
       drawer: const MenuDrawer(currentRoute: "permissions"),
-      appBar: AppBar(
-        backgroundColor: navyBlue,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text("TMS Admin", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-      ),
-      bottomNavigationBar: hasChanges ? _buildBottomSaveBar() : null,
+      appBar: _buildModernAppBar(),
+      bottomNavigationBar: hasChanges ? _buildBottomSaveBar(isDark) : null,
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: primaryYellow))
           : RefreshIndicator(
         onRefresh: _fetchData,
+        color: navyBlue,
         child: ListView(
           padding: const EdgeInsets.symmetric(vertical: 24),
           children: [
-            _buildHeader(),
+            _buildHeader(textColor, isDark),
             const SizedBox(height: 24),
-            _buildRoleSelector(),
+            _buildRoleSelector(isDark),
             const SizedBox(height: 24),
             _buildSummaryCard(),
             const SizedBox(height: 24),
-            _buildMobilePermissionsCards(),
+            _buildMobilePermissionsCards(isDark),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(Color textColor, bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Permissions", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: navyBlue)),
+          Text("Permissions", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: textColor)),
           const SizedBox(height: 4),
-          Text("Select a role to manage its access level", style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+          Text("Select a role to manage its access level", style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 14)),
         ],
       ),
     );
   }
 
-  Widget _buildRoleSelector() {
+  Widget _buildRoleSelector(bool isDark) {
+    final chipBgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final unselectedTextColor = isDark ? Colors.white70 : Colors.black87;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Text("SELECT ROLE", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey.shade600, letterSpacing: 1.0)),
+          child: Text("SELECT ROLE", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, letterSpacing: 1.0)),
         ),
         SizedBox(
           height: 60,
@@ -336,11 +390,11 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: ChoiceChip(
-                  label: Text(role['name'] ?? 'Role', style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, color: isSelected ? navyBlue : Colors.black87)),
+                  label: Text(role['name'] ?? 'Role', style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, color: isSelected ? (isDark ? Colors.black : navyBlue) : unselectedTextColor)),
                   selected: isSelected,
-                  selectedColor: primaryYellow.withOpacity(0.8),
-                  backgroundColor: Colors.white,
-                  side: BorderSide(color: isSelected ? primaryYellow : Colors.grey.shade300),
+                  selectedColor: primaryYellow,
+                  backgroundColor: chipBgColor,
+                  side: BorderSide(color: isSelected ? primaryYellow : (isDark ? Colors.white12 : Colors.grey.shade300)),
                   onSelected: (selected) {
                     if (selected) _selectRole(role);
                   },
@@ -353,10 +407,26 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     );
   }
 
+  // 🔥 UPDATED LOGIC TO ONLY COUNT THE 29 PERMISSIONS IN THE UI
   Widget _buildSummaryCard() {
     if (_selectedRoleId == null) return const SizedBox.shrink();
 
-    int percentage = _masterPermissions.isEmpty ? 0 : ((_currentRolePerms.length / _masterPermissions.length) * 100).toInt();
+    int totalVisiblePerms = 0;
+    int grantedVisiblePerms = 0;
+
+    for (var module in _permissionModules.values) {
+      for (var p in module) {
+        String? id = _resolvePermissionId(p['resource']!, p['action']!);
+        if (id != null) {
+          totalVisiblePerms++;
+          if (_currentRolePerms.contains(id)) {
+            grantedVisiblePerms++;
+          }
+        }
+      }
+    }
+
+    int percentage = totalVisiblePerms == 0 ? 0 : ((grantedVisiblePerms / totalVisiblePerms) * 100).toInt();
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -384,59 +454,55 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                 ],
               ),
             ),
-            Text("${_currentRolePerms.length}/${_masterPermissions.length}", style: TextStyle(color: primaryYellow, fontSize: 20, fontWeight: FontWeight.bold)),
+            Text("$grantedVisiblePerms/$totalVisiblePerms", style: TextStyle(color: primaryYellow, fontSize: 20, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildMobilePermissionsCards() {
+  Widget _buildMobilePermissionsCards(bool isDark) {
     if (_selectedRoleId == null) return const SizedBox.shrink();
+
+    final cardBgColor = isDark ? const Color(0xFF1A1A1A) : Colors.white;
+    final cardHeaderColor = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF8FAFC);
+    final borderColor = isDark ? Colors.white12 : Colors.grey.shade200;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
-        children: _moduleOrder.map((moduleName) {
+        children: _permissionModules.keys.map((moduleName) {
 
-          Map<String, List<String>>? cols = _gridMap[moduleName];
-          bool hasAnyPerms = false;
-          if (cols != null) {
-            for (List<String> list in cols.values) {
-              if (list.isNotEmpty) hasAnyPerms = true;
-            }
+          List<String> validIds = [];
+          for (var p in _permissionModules[moduleName]!) {
+            String? id = _resolvePermissionId(p['resource']!, p['action']!);
+            if (id != null) validIds.add(id);
           }
-          if (!hasAnyPerms) return const SizedBox.shrink();
 
-          List<String> allIdsInModule = [];
-          if (cols != null) {
-            for (List<String> list in cols.values) {
-              allIdsInModule.addAll(list);
-            }
-          }
-          bool allChecked = allIdsInModule.every((id) => _currentRolePerms.contains(id));
+          if (validIds.isEmpty) return const SizedBox.shrink();
+          bool allChecked = validIds.every((id) => _currentRolePerms.contains(id));
 
           return Container(
             margin: const EdgeInsets.only(bottom: 16),
             decoration: BoxDecoration(
-                color: Colors.white,
+                color: cardBgColor,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey.shade200),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8, offset: const Offset(0, 2))]
+                border: Border.all(color: borderColor),
+                boxShadow: isDark ? [] : [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8, offset: const Offset(0, 2))]
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: const BorderRadius.vertical(top: Radius.circular(16)), border: Border(bottom: BorderSide(color: Colors.grey.shade200))),
+                  decoration: BoxDecoration(color: cardHeaderColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(16)), border: Border(bottom: BorderSide(color: borderColor))),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(moduleName[0] + moduleName.substring(1).toLowerCase(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: navyBlue)),
+                      Text(moduleName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : navyBlue)),
                       InkWell(
                         onTap: () => _toggleModuleRow(moduleName),
-                        child: Text(allChecked ? "Revoke All" : "Grant All", style: TextStyle(color: Colors.blue.shade600, fontSize: 13, fontWeight: FontWeight.bold)),
+                        child: Text(allChecked ? "Revoke All" : "Grant All", style: TextStyle(color: primaryYellow, fontSize: 13, fontWeight: FontWeight.bold)),
                       )
                     ],
                   ),
@@ -445,31 +511,37 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: _columnOrder.map((colName) {
-                      List<String> idsForCell = cols?[colName] ?? <String>[];
-                      if (idsForCell.isEmpty) return const SizedBox.shrink();
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: _permissionModules[moduleName]!.map((permConf) {
+                      String? realId = _resolvePermissionId(permConf['resource']!, permConf['action']!);
+                      bool isAvailable = realId != null;
+                      bool isChecked = isAvailable && _currentRolePerms.contains(realId);
 
-                      bool isChecked = idsForCell.every((id) => _currentRolePerms.contains(id));
-
-                      return InkWell(
-                        onTap: () => _togglePermission(idsForCell),
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isChecked ? primaryYellow.withOpacity(0.1) : Colors.transparent,
-                            border: Border.all(color: isChecked ? primaryYellow : Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(isChecked ? Icons.check_box : Icons.check_box_outline_blank, size: 18, color: isChecked ? navyBlue : Colors.grey),
-                              const SizedBox(width: 8),
-                              Text(colName, style: TextStyle(fontSize: 12, fontWeight: isChecked ? FontWeight.bold : FontWeight.w500, color: isChecked ? navyBlue : Colors.black87)),
-                            ],
+                      return GestureDetector(
+                        onTap: isAvailable ? () {
+                          setState(() {
+                            if (isChecked) _currentRolePerms.remove(realId);
+                            else _currentRolePerms.add(realId);
+                          });
+                        } : null,
+                        child: Opacity(
+                          opacity: isAvailable ? 1.0 : 0.5,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white10 : Colors.white,
+                              border: Border.all(color: isChecked ? primaryYellow : borderColor),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(isChecked ? Icons.check_box : Icons.check_box_outline_blank, size: 16, color: isChecked ? (isDark ? primaryYellow : navyBlue) : Colors.grey),
+                                const SizedBox(width: 8),
+                                Text(permConf['label']!, style: TextStyle(fontSize: 11, fontWeight: isChecked ? FontWeight.bold : FontWeight.w600, color: isChecked ? (isDark ? primaryYellow : navyBlue) : (isDark ? Colors.white70 : Colors.black87))),
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -484,12 +556,13 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     );
   }
 
-  Widget _buildBottomSaveBar() {
+  Widget _buildBottomSaveBar(bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, -2))]
+          color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+          border: Border(top: BorderSide(color: isDark ? Colors.white12 : Colors.grey.shade200)),
+          boxShadow: isDark ? [] : [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, -2))]
       ),
       child: SafeArea(
         child: Row(
@@ -514,43 +587,43 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
   List<Map<String, dynamic>> _getFallbackPermissions() {
     return [
-      {"_id": "69d0b67e176b2e74ad5c862e", "resource": "ticket", "action": "create"},
-      {"_id": "69d0b67e176b2e74ad5c8637", "resource": "ticket", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c863e", "resource": "ticket", "action": "view_own"},
-      {"_id": "69d0b67e176b2e74ad5c8646", "resource": "ticket", "action": "update"},
-      {"_id": "69d0b67e176b2e74ad5c864a", "resource": "ticket", "action": "delete"},
-      {"_id": "69d0b67e176b2e74ad5c864d", "resource": "ticket", "action": "assign"},
-      {"_id": "69d0b67e176b2e74ad5c8650", "resource": "ticket", "action": "change_status"},
-      {"_id": "69d0b67e176b2e74ad5c8653", "resource": "ticket", "action": "change_priority"},
-      {"_id": "69d0b67e176b2e74ad5c8656", "resource": "ticket", "action": "close"},
-      {"_id": "69d0b67e176b2e74ad5c8659", "resource": "ticket", "action": "reopen"},
-      {"_id": "69d0b67e176b2e74ad5c865c", "resource": "comment", "action": "create"},
-      {"_id": "69d0b67e176b2e74ad5c865f", "resource": "comment", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c8662", "resource": "comment", "action": "update"},
-      {"_id": "69d0b67e176b2e74ad5c8665", "resource": "comment", "action": "delete"},
-      {"_id": "69d0b67e176b2e74ad5c8668", "resource": "attachment", "action": "upload"},
-      {"_id": "69d0b67e176b2e74ad5c866b", "resource": "attachment", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c866e", "resource": "attachment", "action": "delete"},
-      {"_id": "69d0b67e176b2e74ad5c8671", "resource": "team", "action": "create"},
-      {"_id": "69d0b67e176b2e74ad5c8674", "resource": "team", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c8677", "resource": "team", "action": "update"},
-      {"_id": "69d0b67e176b2e74ad5c867a", "resource": "team", "action": "delete"},
-      {"_id": "69d0b67e176b2e74ad5c867d", "resource": "user", "action": "create"},
-      {"_id": "69d0b67e176b2e74ad5c8680", "resource": "user", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c8683", "resource": "user", "action": "update"},
-      {"_id": "69d0b67e176b2e74ad5c8686", "resource": "user", "action": "delete"},
-      {"_id": "69d0b67e176b2e74ad5c8689", "resource": "user", "action": "assign_role"},
-      {"_id": "69d0b67e176b2e74ad5c868c", "resource": "role", "action": "create"},
-      {"_id": "69d0b67e176b2e74ad5c868f", "resource": "role", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c8692", "resource": "role", "action": "update"},
-      {"_id": "69d0b67e176b2e74ad5c8695", "resource": "role", "action": "delete"},
-      {"_id": "69d0b67e176b2e74ad5c8698", "resource": "permission", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c869b", "resource": "permission", "action": "assign"},
-      {"_id": "69d0b67e176b2e74ad5c869e", "resource": "dashboard", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c86a1", "resource": "report", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c86a4", "resource": "report", "action": "export"},
-      {"_id": "69d0b67e176b2e74ad5c86a7", "resource": "settings", "action": "view"},
-      {"_id": "69d0b67e176b2e74ad5c86aa", "resource": "settings", "action": "update"}
+      {"_id": "69f8312a3380862b35f38908", "resource": "ticket", "action": "create"},
+      {"_id": "69f8312a3380862b35f38909", "resource": "ticket", "action": "view"},
+      {"_id": "69f8312a3380862b35f3890a", "resource": "ticket", "action": "view_own"},
+      {"_id": "69f8312a3380862b35f3890b", "resource": "ticket", "action": "update"},
+      {"_id": "69f8312a3380862b35f3890c", "resource": "ticket", "action": "delete"},
+      {"_id": "69f8312a3380862b35f3890d", "resource": "ticket", "action": "assign"},
+      {"_id": "69f8312a3380862b35f3890e", "resource": "ticket", "action": "change_status"},
+      {"_id": "69f8312a3380862b35f3890f", "resource": "ticket", "action": "change_priority"},
+      {"_id": "69f8312a3380862b35f38910", "resource": "ticket", "action": "close"},
+      {"_id": "69f8312a3380862b35f38911", "resource": "ticket", "action": "reopen"},
+      {"_id": "69f8312a3380862b35f38912", "resource": "comment", "action": "create"},
+      {"_id": "69f8312a3380862b35f38913", "resource": "comment", "action": "view"},
+      {"_id": "69f8312a3380862b35f38914", "resource": "comment", "action": "update"},
+      {"_id": "69f8312a3380862b35f38915", "resource": "comment", "action": "delete"},
+      {"_id": "69f8312a3380862b35f38916", "resource": "attachment", "action": "upload"},
+      {"_id": "69f8312a3380862b35f38917", "resource": "attachment", "action": "view"},
+      {"_id": "69f8312a3380862b35f38918", "resource": "attachment", "action": "delete"},
+      {"_id": "69f8312a3380862b35f38919", "resource": "team", "action": "create"},
+      {"_id": "69f8312a3380862b35f3891a", "resource": "team", "action": "view"},
+      {"_id": "69f8312a3380862b35f3891b", "resource": "team", "action": "update"},
+      {"_id": "69f8312a3380862b35f3891c", "resource": "team", "action": "delete"},
+      {"_id": "69f8312a3380862b35f3891d", "resource": "user", "action": "create"},
+      {"_id": "69f8312a3380862b35f3891e", "resource": "user", "action": "view"},
+      {"_id": "69f8312a3380862b35f3891f", "resource": "user", "action": "update"},
+      {"_id": "69f8312a3380862b35f38920", "resource": "user", "action": "delete"},
+      {"_id": "69f8312a3380862b35f38921", "resource": "user", "action": "assign_role"},
+      {"_id": "69f8312a3380862b35f38922", "resource": "role", "action": "create"},
+      {"_id": "69f8312a3380862b35f38923", "resource": "role", "action": "view"},
+      {"_id": "69f8312a3380862b35f38924", "resource": "role", "action": "update"},
+      {"_id": "69f8312a3380862b35f38925", "resource": "role", "action": "delete"},
+      {"_id": "69f8312a3380862b35f38926", "resource": "permission", "action": "view"},
+      {"_id": "69f8312a3380862b35f38927", "resource": "permission", "action": "assign"},
+      {"_id": "69f8312a3380862b35f38928", "resource": "dashboard", "action": "view"},
+      {"_id": "69f8312a3380862b35f38929", "resource": "report", "action": "view"},
+      {"_id": "69f8312a3380862b35f3892a", "resource": "report", "action": "export"},
+      {"_id": "69f8312a3380862b35f3892b", "resource": "settings", "action": "view"},
+      {"_id": "69f8312a3380862b35f3892c", "resource": "settings", "action": "update"}
     ];
   }
 }

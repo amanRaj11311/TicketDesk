@@ -5,7 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user_model.dart';
 
 class AuthService {
-  final String loginUrl = 'https://ticketapi.dcstechnosis.com/api/auth/login';
+  final String loginUrl = 'https://uat.ticketapi.dcstechnosis.com/api/auth/login';
   final _storage = const FlutterSecureStorage();
 
   // 1. Login Method

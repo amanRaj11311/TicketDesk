@@ -1,15 +1,21 @@
+import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dio/dio.dart';
+import 'package:image_picker/image_picker.dart';
+
 import '../../providers/theme_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/ticket_service.dart';
 import '../../models/ticket.dart';
 import '../../widgets/menu_drawer.dart';
+import '../authscreen/login_screen.dart';
 import '../common/profile_screen.dart';
 import '../common/ticket_detail_screen.dart';
-import '../common/create_ticket_screen.dart';
+import '../common/ticket_screen.dart'; // 🔥 Imported to navigate to Tickets Module
+import '../constants/api_constants.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -19,8 +25,8 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final String _baseUrl = "https://ticketapi.dcstechnosis.com";
-  final TextEditingController _searchController = TextEditingController();
+  final String _baseUrl = ApiConstants.baseUrl;
+  final TicketService _ticketService = TicketService();
 
   String _firstName = "User";
   String _initials = "U";
@@ -30,42 +36,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Ticket> _allTickets = [];
   bool _isLoading = true;
 
-  // 🔥 STRICT ROLES AND PERMISSIONS STATE
+  // 🔥 STRICT MODULE & ACTION BASED PERMISSIONS
   bool _isAdmin = false;
-  bool _canViewTickets = false;
-  bool _canCreateTicket = false;
 
-  // Admin specific data
+  bool _canViewDashboard = true;
+  bool _canViewUsers = false;
+
+  bool _canViewAllTickets = false;
+  bool _canViewOwnTickets = false;
+  bool _canCreateTicket = false;
+  bool _canUpdateTicket = false;
+  bool _canDeleteTicket = false;
+
+  // Permissions for Create Ticket
+  bool _canChangePriority = false;
+  bool _canUploadAttachment = false;
+
+  bool get _hasAnyTicketViewAccess => _canViewAllTickets || _canViewOwnTickets;
+
   int _totalUsers = 0;
+  String _rawUserDataString = "No Data Found";
 
   @override
   void initState() {
     super.initState();
     _fetchUserProfileLocally();
-  }
-
-  // 🔥 HELPER: Load Demo User if API/Storage fails
-  void _loadDemoUser() {
-    setState(() {
-      _firstName = "Admin";
-      _initials = "AD";
-      _currentUserId = "demo_admin_123";
-      _isAdmin = true;
-      _canViewTickets = true;
-      _canCreateTicket = true;
-    });
-    _loadDashboardData();
-  }
-
-  // 🔥 HELPER: Demo Tickets List
-  List<Ticket> _getDemoTickets() {
-    return [
-      Ticket(id: '60d5ecb54', ticketId: 'TK-891', subject: 'Internet is down on 3rd floor', description: 'Router shows red light', status: 'Open', priority: 'Critical', attachments: []),
-      Ticket(id: '60d5ecb55', ticketId: 'TK-892', subject: 'Laptop screen blinking', description: 'Screen remains black after power on', status: 'In Progress', priority: 'High', attachments: []),
-      Ticket(id: '60d5ecb56', ticketId: 'TK-893', subject: 'Need access to Server', description: 'Please grant developer access', status: 'Closed', priority: 'Medium', attachments: []),
-      Ticket(id: '60d5ecb57', ticketId: 'TK-894', subject: 'Printer out of ink', description: 'HR department printer needs cartridge replacement', status: 'Open', priority: 'Low', attachments: []),
-      Ticket(id: '60d5ecb58', ticketId: 'TK-895', subject: 'Email password reset', description: 'Forgot my outlook password', status: 'Resolved', priority: 'High', attachments: []),
-    ];
   }
 
   Future<void> _fetchUserProfileLocally() async {
@@ -74,97 +69,278 @@ class _DashboardScreenState extends State<DashboardScreen> {
       String? userDataString = await storage.read(key: "user_data");
 
       if (userDataString != null) {
+        _rawUserDataString = userDataString;
+
         final userData = jsonDecode(userDataString);
         setState(() {
           String fullName = userData['name'] ?? 'User';
-          _firstName = fullName.split(' ').first;
-          _profileImageUrl = userData['profileImage'];
-          List<String> nameParts = fullName.trim().split(" ");
+          List<String> nameParts = fullName.trim().split(RegExp(r'\s+'));
+          _firstName = nameParts.isNotEmpty ? nameParts.first : 'User';
 
-          if (nameParts.length > 1) {
-            _initials =
-                nameParts[0][0].toUpperCase() + nameParts[1][0].toUpperCase();
-          } else if (nameParts.isNotEmpty) {
+          if (nameParts.length > 1 && nameParts[1].isNotEmpty) {
+            _initials = nameParts[0][0].toUpperCase() + nameParts[1][0].toUpperCase();
+          } else if (nameParts.isNotEmpty && nameParts[0].isNotEmpty) {
             _initials = nameParts[0][0].toUpperCase();
           } else {
             _initials = "U";
           }
+
           _currentUserId = (userData['_id'] ?? userData['id'] ?? '').toString();
 
-          _isAdmin = userData['role'] == 'admin';
-          _canViewTickets = _isAdmin || (userData['canViewTicket'] == true);
-          _canCreateTicket = _isAdmin || (userData['canCreateTicket'] == true);
+          String userRole = userData['role']?.toString().toLowerCase().trim() ?? '';
+          _isAdmin = (userRole == 'admin' || userRole == 'super admin');
+
+          // Reset everything except Dashboard
+          _canViewUsers = false;
+          _canViewAllTickets = false;
+          _canViewOwnTickets = false;
+          _canCreateTicket = false;
+          _canUpdateTicket = false;
+          _canDeleteTicket = false;
+          _canChangePriority = false;
+          _canUploadAttachment = false;
+
+          // 🔥 PARSE PERMISSIONS DYNAMICALLY
+          if (userData['permissions'] != null && userData['permissions'] is List) {
+            for (var perm in userData['permissions']) {
+              String res = perm['resource']?.toString().toLowerCase().trim() ?? '';
+              String act = perm['action']?.toString().toLowerCase().trim() ?? '';
+
+              if (res == 'user' && act == 'view') _canViewUsers = true;
+
+              if (res == 'ticket') {
+                if (act == 'view' || act == 'view_all') _canViewAllTickets = true;
+                if (act == 'view_own') _canViewOwnTickets = true;
+                if (act == 'create') _canCreateTicket = true;
+                if (act == 'update' || act == 'edit') _canUpdateTicket = true;
+                if (act == 'delete') _canDeleteTicket = true;
+                if (act == 'change_priority') _canChangePriority = true;
+              }
+              if (res == 'attachment' && act == 'upload') _canUploadAttachment = true;
+            }
+          }
         });
 
         _loadDashboardData();
       } else {
-        _loadDemoUser();
+        setState(() => _isLoading = false);
       }
     } catch (e) {
       debugPrint("Dashboard Profile Error: $e");
-      _loadDemoUser();
+      _rawUserDataString = "Error parsing data: $e";
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _loadDashboardData() async {
-    if (!_canViewTickets) {
-      if (mounted) setState(() => _isLoading = false);
-      return;
-    }
-
     try {
       const storage = FlutterSecureStorage();
       String? token = await storage.read(key: "jwt_token");
 
-      if (_isAdmin) {
+      // Only fetch users if permitted
+      if (_canViewUsers) {
         try {
           var usersRes = await Dio().get("$_baseUrl/api/users",
               options: Options(headers: {"Authorization": "Bearer ${token ?? ''}"}));
           if (usersRes.statusCode == 200) {
             var data = usersRes.data;
-            List usersList =
-            data is List ? data : (data['users'] ?? data['data'] ?? []);
+            List usersList = data is List ? data : (data['users'] ?? data['data'] ?? []);
             _totalUsers = usersList.length;
           } else {
-            _totalUsers = 14;
+            _totalUsers = 0;
           }
         } catch (e) {
-          debugPrint("Failed to fetch users count: $e");
-          _totalUsers = 14;
+          _totalUsers = 0;
         }
       }
 
-      List<Ticket> tickets = [];
-      try {
-        tickets = await TicketService().fetchTickets();
-      } catch (e) {
-        debugPrint("API Failed, loading demo tickets: $e");
+      // Fetch and Filter Tickets based on access
+      if (_hasAnyTicketViewAccess) {
+        List<Ticket> tickets = [];
+        try {
+          tickets = await _ticketService.fetchTickets();
+
+          if (!_canViewAllTickets && _canViewOwnTickets) {
+            tickets = tickets.where((t) => t.createdBy == _currentUserId).toList();
+          }
+        } catch (e) {
+          debugPrint("API Failed: $e");
+        }
+
+        if (mounted) {
+          setState(() {
+            _allTickets = tickets;
+          });
+        }
       }
 
-      if (tickets.isEmpty) {
-        tickets = _getDemoTickets();
-      }
+      if (mounted) setState(() => _isLoading = false);
 
-      if (!_isAdmin && _currentUserId.isNotEmpty) {
-        // Handle user filtering if needed
-      }
-
-      if (mounted) {
-        setState(() {
-          _allTickets = tickets;
-          _isLoading = false;
-        });
-      }
     } catch (e) {
-      debugPrint("Error loading dashboard data: $e");
-      if (mounted) {
-        setState(() {
-          _totalUsers = 14;
-          _allTickets = _getDemoTickets();
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // Helper method to safely extract Ticket Number
+  String _getDisplayTicketNumber(Ticket t) {
+    try {
+      var num = (t as dynamic).ticketNumber;
+      if (num != null && num.toString().isNotEmpty) return num.toString();
+    } catch (_) {}
+    if (t.ticketId.isNotEmpty) return t.ticketId;
+    return "TKT-${t.id.substring(t.id.length - 4)}";
+  }
+
+  // =========================================================================
+  // 🔥 CREATE TICKET BOTTOM SHEET
+  // =========================================================================
+  void _openCreateTicketBottomSheet() {
+    final titleController = TextEditingController();
+    final descriptionController = TextEditingController();
+    String localPriority = 'low';
+    File? localImage;
+    bool isSubmitting = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) {
+        final isDark = Provider.of<ThemeProvider>(context).isDarkMode;
+        final bgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+        final inputColor = isDark ? const Color(0xFF121212) : const Color(0xFFF8FAFC);
+        final textColor = isDark ? Colors.white : Colors.black;
+        final labelColor = isDark ? Colors.grey.shade400 : const Color(0xFF64748B);
+
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+
+            Future<void> pickImage() async {
+              final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+              if (pickedFile != null) {
+                setModalState(() => localImage = File(pickedFile.path));
+              }
+            }
+
+            Future<void> submitForm() async {
+              if (titleController.text.trim().isEmpty || descriptionController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please fill all required fields"), backgroundColor: Colors.orange));
+                return;
+              }
+
+              setModalState(() => isSubmitting = true);
+
+              int statusCode = await _ticketService.createTicket(
+                titleController.text.trim(),
+                descriptionController.text.trim(),
+                localPriority,
+                localImage,
+              );
+
+              if (!context.mounted) return;
+
+              if (statusCode == 201 || statusCode == 200) {
+                Navigator.pop(context);
+                _loadDashboardData();
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ticket Created Successfully!"), backgroundColor: Colors.green));
+              } else if (statusCode == 401) {
+                Navigator.pop(context);
+                Provider.of<AuthProvider>(context, listen: false).logout();
+                Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const LoginScreen()), (route) => false);
+              } else {
+                setModalState(() => isSubmitting = false);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Failed to create ticket. Server Error."), backgroundColor: Colors.red));
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: Container(
+                padding: const EdgeInsets.all(24.0),
+                decoration: BoxDecoration(color: bgColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(child: Container(width: 40, height: 5, margin: const EdgeInsets.only(bottom: 20), decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)))),
+                      Text("Create New Ticket", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor)),
+                      const SizedBox(height: 20),
+
+                      Text("SUBJECT / TITLE", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: labelColor)),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: titleController,
+                        style: TextStyle(color: textColor),
+                        decoration: InputDecoration(hintText: "E.g., Internet is down", hintStyle: const TextStyle(color: Colors.grey), filled: true, fillColor: inputColor, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                      ),
+                      const SizedBox(height: 20),
+
+                      Text("DESCRIPTION", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: labelColor)),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: descriptionController,
+                        maxLines: 3,
+                        style: TextStyle(color: textColor),
+                        decoration: InputDecoration(hintText: "Describe the issue in detail...", hintStyle: const TextStyle(color: Colors.grey), filled: true, fillColor: inputColor, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                      ),
+                      const SizedBox(height: 20),
+
+                      if (_canChangePriority) ...[
+                        Text("PRIORITY", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: labelColor)),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          value: localPriority,
+                          dropdownColor: inputColor,
+                          style: TextStyle(color: textColor, fontSize: 14),
+                          decoration: InputDecoration(filled: true, fillColor: inputColor, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                          items: ['low', 'medium', 'high', 'critical'].map((String value) => DropdownMenuItem(value: value, child: Text(value.toUpperCase()))).toList(),
+                          onChanged: (val) => setModalState(() => localPriority = val!),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+
+                      if (_canUploadAttachment) ...[
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(color: inputColor, borderRadius: BorderRadius.circular(12)),
+                          child: Row(
+                            children: [
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(backgroundColor: isDark ? Colors.blue.withOpacity(0.2) : const Color(0xFFEFF6FF), foregroundColor: isDark ? Colors.blue : const Color(0xFF1E293B), elevation: 0),
+                                onPressed: pickImage,
+                                icon: const Icon(Icons.add_photo_alternate_outlined),
+                                label: const Text("Attach Photo"),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(child: Text(localImage != null ? "✅ Image attached" : "No image selected", style: TextStyle(color: localImage != null ? Colors.green : Colors.grey, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 30),
+                      ] else ...[
+                        const SizedBox(height: 10),
+                      ],
+
+                      SizedBox(
+                        width: double.infinity, height: 50,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                          onPressed: isSubmitting ? null : submitForm,
+                          child: isSubmitting
+                              ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const Text("Submit Ticket", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                        ),
+                      )
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -186,36 +362,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               _buildHeader(isDark),
               const SizedBox(height: 24),
-              if (_canViewTickets) ...[
-                // 1. KPI GRID
-                _isAdmin ? _buildAdminKPIGrid(isDark) : _buildUserKPIGrid(isDark),
-                const SizedBox(height: 24),
 
-                // 🔥 2. NEW: BEAUTIFUL BAR CHART GRAPH
-                _buildWeeklyAnalyticsChart(isDark),
-                const SizedBox(height: 24),
+              // KPI Grid and Data Tables
+              _buildDynamicKPIGrid(isDark),
+              const SizedBox(height: 24),
 
-                // 3. RECENT TICKETS TABLE
+              if (_hasAnyTicketViewAccess) ...[
                 _buildRecentTicketsTable(isDark),
                 const SizedBox(height: 24),
-
-                // 4. OVERVIEW PROGRESS BARS
                 _buildTicketOverview(isDark),
               ] else ...[
-                // FALLBACK UI FOR USERS WITH NO PERMISSION
                 Center(
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 60.0),
+                    padding: const EdgeInsets.only(top: 40.0),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.lock_outline, size: 80, color: isDark ? Colors.white24 : Colors.grey.shade400),
-                        const SizedBox(height: 24),
-                        Text("Access Denied", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
-                        const SizedBox(height: 12),
-                        Text("You have no assigned module.\nPlease ask admin for allow.",
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 16, color: isDark ? Colors.white54 : Colors.grey.shade600, height: 1.5)),
+                        Icon(Icons.inbox_outlined, size: 60, color: isDark ? Colors.white24 : Colors.grey.shade300),
+                        const SizedBox(height: 16),
+                        Text("No tickets to display.", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: isDark ? Colors.white54 : Colors.grey.shade500)),
                       ],
                     ),
                   ),
@@ -235,7 +400,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       iconTheme: const IconThemeData(color: Colors.white),
       title: const Text("Dashboard", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       actions: [
-        IconButton(icon: const Icon(Icons.notifications_none, color: Colors.white), onPressed: () {}),
+        // IconButton(icon: const Icon(Icons.notifications_none, color: Colors.white), onPressed: () {}),
         _buildAvatarMenu(),
       ],
     );
@@ -281,19 +446,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Good day, $_firstName 👋", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor)),
-            Text("Here's your workspace overview", style: TextStyle(color: subTextColor, fontSize: 14)),
-          ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Good day, $_firstName 👋", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor), overflow: TextOverflow.ellipsis),
+              Text("Here's your workspace overview", style: TextStyle(color: subTextColor, fontSize: 14)),
+            ],
+          ),
         ),
         if (_canCreateTicket)
           ElevatedButton.icon(
-            onPressed: () async {
-              final res = await Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateTicketScreen()));
-              if (res == true) _loadDashboardData();
-            },
+            onPressed: _openCreateTicketBottomSheet,
             icon: const Icon(Icons.add, size: 18, color: Colors.black),
             label: const Text("New Ticket", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(
@@ -307,115 +471,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // 🔥 NEW WIDGET: WEEKLY ANALYTICS BAR CHART
-  Widget _buildWeeklyAnalyticsChart(bool isDark) {
-    Color cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    Color textColor = isDark ? Colors.white : Colors.black;
-    Color borderColor = isDark ? Colors.grey.shade800 : Colors.grey.shade100;
-
-    // Demo Data for Graph
-    final List<Map<String, dynamic>> weeklyData = [
-      {"day": "Mon", "value": 12},
-      {"day": "Tue", "value": 18},
-      {"day": "Wed", "value": 25},
-      {"day": "Thu", "value": 15},
-      {"day": "Fri", "value": 22},
-      {"day": "Sat", "value": 8},
-      {"day": "Sun", "value": 5},
-    ];
-
-    double maxCount = 25.0; // Base max value for scaling
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: borderColor),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text("Weekly Activity", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor)),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: const Color(0xFFF3C300).withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                child: const Text("This Week", style: TextStyle(color: Color(0xFFB48600), fontSize: 11, fontWeight: FontWeight.bold)),
-              )
-            ],
-          ),
-          const SizedBox(height: 30),
-          // Bar Chart Row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: weeklyData.map((data) {
-              double heightPercentage = data["value"] / maxCount;
-              return Column(
-                children: [
-                  // Number Tooltip
-                  Text("${data["value"]}", style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  // The Bar
-                  Container(
-                    width: 20,
-                    height: 100 * heightPercentage, // Max height is 100px
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [const Color(0xFFF3C300), const Color(0xFFF3C300).withOpacity(0.5)],
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                      ),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  // Day Label
-                  Text(data["day"], style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.black54, fontSize: 11, fontWeight: FontWeight.bold)),
-                ],
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAdminKPIGrid(bool isDark) {
-    int totalT = _allTickets.length;
-    int openT = _allTickets.where((t) => t.status.toLowerCase() == 'open').length;
-    int resolvedT = _allTickets.where((t) => t.status.toLowerCase() == 'closed' || t.status.toLowerCase() == 'resolved').length;
-
+  Widget _buildDynamicKPIGrid(bool isDark) {
     return LayoutBuilder(builder: (context, constraints) {
       double width = constraints.maxWidth;
       double cardWidth = (width - 16) / 2;
 
+      List<Widget> activeCards = [];
+
+      if (_canViewUsers) {
+        activeCards.add(_buildModernKPICard("Total Users", "$_totalUsers", Icons.people, isDark, cardWidth));
+      }
+
+      if (_hasAnyTicketViewAccess) {
+        int totalT = _allTickets.length;
+        int openT = _allTickets.where((t) => t.status.toLowerCase() == 'open').length;
+        int resolvedT = _allTickets.where((t) =>t.status.toLowerCase() == 'resolved').length;
+
+        String prefix = _canViewAllTickets ? "Total" : "My";
+        String openPrefix = _canViewAllTickets ? "Open" : "My Open";
+
+        activeCards.add(_buildModernKPICard("$prefix Tickets", "$totalT", Icons.confirmation_number, isDark, cardWidth));
+        activeCards.add(_buildModernKPICard(openPrefix, "$openT", Icons.folder_open, isDark, cardWidth));
+        activeCards.add(_buildModernKPICard("Resolved", "$resolvedT", Icons.check_circle, isDark, cardWidth));
+      }
+
+      if (activeCards.isEmpty) return const SizedBox.shrink();
+
       return Wrap(
         spacing: 16,
         runSpacing: 16,
-        children: [
-          _buildModernKPICard("Total Users", "$_totalUsers", Icons.people, isDark, cardWidth),
-          _buildModernKPICard("Total Tickets", "$totalT", Icons.confirmation_number, isDark, cardWidth),
-          _buildModernKPICard("Open Tickets", "$openT", Icons.folder_open, isDark, cardWidth),
-          _buildModernKPICard("Resolved Tickets", "$resolvedT", Icons.check_circle, isDark, cardWidth),
-        ],
+        children: activeCards,
       );
     });
-  }
-
-  Widget _buildUserKPIGrid(bool isDark) {
-    int open = _allTickets.where((t) => t.status.toLowerCase() == 'open').length;
-    return Row(
-      children: [
-        Expanded(child: _buildModernKPICard("My Tickets", "${_allTickets.length}", Icons.confirmation_number_rounded, isDark, double.infinity)),
-        const SizedBox(width: 16),
-        Expanded(child: _buildModernKPICard("Open", "$open", Icons.folder_open_rounded, isDark, double.infinity)),
-      ],
-    );
   }
 
   Widget _buildModernKPICard(String title, String count, IconData icon, bool isDark, double width) {
@@ -454,10 +541,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // =========================================================================
+  // 🔥 UPDATED RECENT TICKETS TABLE WITH 'VIEW ALL' AND DOT PILLS
+  // =========================================================================
   Widget _buildRecentTicketsTable(bool isDark) {
     Color cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     Color textColor = isDark ? Colors.white : Colors.black;
     Color borderColor = isDark ? Colors.grey.shade800 : Colors.grey.shade100;
+
+    String tableTitle = _canViewAllTickets ? "Global Recent Tickets" : "Your Recent Tickets";
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -465,28 +557,65 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_isAdmin ? "Global Recent Tickets" : "Your Recent Tickets", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor)),
-          Divider(height: 24, color: borderColor),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(tableTitle, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor)),
+              TextButton(
+                onPressed: () {
+                  // Navigate directly to Tickets Module
+                  Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const TicketsScreen()));
+                },
+                child: const Text("View All", style: TextStyle(color: Color(0xFFF3C300), fontWeight: FontWeight.bold)),
+              )
+            ],
+          ),
+          Divider(height: 16, color: borderColor),
+          const SizedBox(height: 8),
+
           if (_allTickets.isEmpty)
             Center(child: Padding(padding: const EdgeInsets.all(20), child: Text("No tickets found", style: TextStyle(color: textColor))))
           else
-            ListView.separated(
+            ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: _allTickets.take(5).length,
-              separatorBuilder: (context, index) => Divider(height: 1, color: borderColor),
               itemBuilder: (context, index) {
                 final t = _allTickets[index];
                 return InkWell(
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => TicketDetailScreen(ticket: t))).then((_) => _loadDashboardData()),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                        color: isDark ? Colors.white10 : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: isDark ? Colors.white12 : Colors.grey.shade100)
+                    ),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        _buildIDPill(t.id),
+                        Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(t.title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: textColor), overflow: TextOverflow.ellipsis),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Text(_getDisplayTicketNumber(t), style: TextStyle(fontSize: 13, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 8),
+                                      child: Text("•", style: TextStyle(color: Colors.grey)),
+                                    ),
+                                    _buildDotPill(t.status, isDark),
+                                  ],
+                                )
+                              ],
+                            )
+                        ),
                         const SizedBox(width: 12),
-                        Expanded(child: Text(t.subject, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor), overflow: TextOverflow.ellipsis)),
-                        _buildStatusPill(t.status),
+                        _buildDotPill(t.priority, isDark), // Show Priority on the right
                       ],
                     ),
                   ),
@@ -495,6 +624,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  // Helper Widget for Web-Style Dot Pills (Status and Priority)
+  Widget _buildDotPill(String text, bool isDark) {
+    Color color; Color bgColor; String val = text.toLowerCase();
+
+    // Determine colors
+    if (val == 'open' || val == 'high') { color = Colors.orange.shade700; bgColor = isDark ? Colors.orange.withOpacity(0.1) : Colors.orange.shade50; }
+    else if (val.contains('progress') || val == 'medium') { color = Colors.blue.shade700; bgColor = isDark ? Colors.blue.withOpacity(0.1) : Colors.blue.shade50; }
+    else if (val == 'critical') { color = Colors.red.shade700; bgColor = isDark ? Colors.red.withOpacity(0.1) : Colors.red.shade50; }
+    else if (val == 'resolved' || val == 'low') { color = Colors.grey.shade700; bgColor = isDark ? Colors.white10 : Colors.grey.shade200; }
+    else { color = Colors.green.shade700; bgColor = isDark ? Colors.green.withOpacity(0.1) : Colors.green.shade50; } // closed/done
+
+    // Specific match for "Medium" Indigo tone from screenshot
+    if (val == 'medium') {
+      color = const Color(0xFF6366F1); // Indigo
+      bgColor = isDark ? const Color(0xFF6366F1).withOpacity(0.1) : const Color(0xFFEEF2FF);
+    }
+
+    String displayText = text.split('_').map((word) => word.isNotEmpty ? '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}' : '').join(' ');
+
+    return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(20)),
+        child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+              const SizedBox(width: 6),
+              Text(displayText, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold))
+            ]
+        )
     );
   }
 
@@ -541,28 +703,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ClipRRect(borderRadius: BorderRadius.circular(10), child: LinearProgressIndicator(value: perc, color: color, backgroundColor: bgColor, minHeight: 8)),
         ],
       ),
-    );
-  }
-
-  Widget _buildIDPill(String id) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: const Color(0xFFFEF9C3), borderRadius: BorderRadius.circular(6)),
-      child: Text("TK-${id.substring(id.length > 3 ? id.length - 3 : 0).toUpperCase()}",
-          style: const TextStyle(color: Color(0xFF854D0E), fontWeight: FontWeight.bold, fontSize: 10)),
-    );
-  }
-
-  Widget _buildStatusPill(String status) {
-    bool isInProgress = status.toLowerCase().contains('progress');
-    Color color = status.toLowerCase() == 'open'
-        ? Colors.orange
-        : (status.toLowerCase() == 'closed' || status.toLowerCase() == 'resolved' ? Colors.green : Colors.blue);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-      child: Text(isInProgress ? "IN PROGRESS" : status.toUpperCase(), style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
     );
   }
 }

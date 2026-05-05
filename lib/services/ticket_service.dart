@@ -1,82 +1,80 @@
-import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../models/ticket.dart';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../constants/api_constants.dart';
+import '../models/ticket.dart';
 
 class TicketService {
-  // 🔥 POINTING DIRECTLY TO THE NODE.JS BACKEND!
-  final String _baseUrl = "https://ticketapi.dcstechnosis.com/api";
+  // 🔥 Ek hi Dio instance use karna best practice hai
   final Dio _dio = Dio();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
+  // ==========================================
+  // 1. FETCH TICKETS
+  // ==========================================
   Future<List<Ticket>> fetchTickets() async {
     try {
       String? token = await _storage.read(key: "jwt_token");
       if (token == null) return [];
 
       var response = await _dio.get(
-        "$_baseUrl/tickets",
-        options: Options(
-          headers: {
-            "Authorization": "Bearer $token",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-          },
-        ),
+        "${ApiConstants.baseUrl}/api/tickets",
+        options: Options(headers: {"Authorization": "Bearer $token"}),
       );
 
       if (response.statusCode == 200) {
-        var data = response.data;
-        List dynamicList = [];
-
-        if (data is List) {
-          dynamicList = data;
-        } else if (data is Map) {
-          dynamicList =
-              data['tickets'] ?? data['data'] ?? data['results'] ?? [];
-        }
-
-        return dynamicList.map((json) => Ticket.fromJson(json)).toList();
+        List data = response.data['data'] ?? response.data['tickets'] ?? [];
+        return data.map((json) => Ticket.fromJson(json)).toList();
       }
       return [];
-    } on DioException catch (e) {
-      debugPrint(
-          "Ticket Fetch Error [${e.response?.statusCode}]: ${e.response?.data}");
-      return [];
     } catch (e) {
-      debugPrint("General Ticket Error: $e");
+      debugPrint("Fetch Tickets Error: $e");
       return [];
     }
   }
 
-  Future<int> createTicket(
-      String subject, String description, String priority, File? image) async {
+  // ==========================================
+  // 2. CREATE TICKET
+  // ==========================================
+  Future<int> createTicket(String title, String description, String priority, File? image) async {
     try {
       String? token = await _storage.read(key: "jwt_token");
-      if (token == null) return 401;
+      if (token == null) return 401; // Unauthorized (Session Expired)
 
+      // FormData banayenge kyunki text ke saath image (file) bhi ja sakti hai
       FormData formData = FormData.fromMap({
-        "subject": subject,
+        "title": title, // Agar backend 'subject' maange, to isko "subject" kar dena
         "description": description,
-        "priority": priority,
-        if (image != null)
-          "image": await MultipartFile.fromFile(image.path,
-              filename: image.path.split('/').last),
+        "priority": priority.toLowerCase(),
       });
 
-      Response response = await _dio.post(
-        "$_baseUrl/tickets",
+      if (image != null) {
+        String fileName = image.path.split('/').last;
+        formData.files.add(MapEntry(
+          "images", // Backend me file receiver field ka naam "images" hona chahiye
+          await MultipartFile.fromFile(image.path, filename: fileName),
+        ));
+      }
+
+      var response = await _dio.post(
+        "${ApiConstants.baseUrl}/api/tickets",
         data: formData,
-        options: Options(headers: {"Authorization": "Bearer $token"}),
+        options: Options(
+          headers: {"Authorization": "Bearer $token"},
+          validateStatus: (status) => true, // App crash hone se rokega
+        ),
       );
 
+      // 🔥 Terminal me backend ka exact response dikhayega
+      debugPrint("Create Ticket Response Code: ${response.statusCode}");
+      debugPrint("Create Ticket Response Data: ${response.data}");
+
       return response.statusCode ?? 500;
-    } on DioException catch (e) {
-      debugPrint("❌ Create Ticket Fail: ${e.response?.data}");
-      return e.response?.statusCode ?? 500;
     } catch (e) {
-      return 500;
+      debugPrint("Create Ticket Error: $e");
+      return 500; // Internal Server Error
     }
   }
 }

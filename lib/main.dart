@@ -5,7 +5,7 @@ import 'providers/auth_provider.dart';
 import 'providers/theme_provider.dart'; // 🔥 Import path fix kar diya hai
 import 'screens/authscreen/login_screen.dart';
 import 'screens/authscreen/splash_screen.dart';
-import 'screens/common/create_ticket_screen.dart';
+
 
 void main() {
   runApp(
