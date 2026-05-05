@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart'; // 🔥 Imported for session check
 import '../../providers/auth_provider.dart';
-import '../common/dashboard_screen.dart'; // 🔥 Only need this one import now
+import '../common/dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,12 +11,16 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen>
-    with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+
   bool _obscurePassword = true;
   bool _isButtonTapped = false;
+
+  // 🔥 New State Variables
+  bool _keepMeLoggedIn = true;
+  bool _isCheckingSession = true; // To prevent visual flicker while checking token
 
   // Theme Colors - Unified Clean Palette
   final Color primaryYellow = const Color(0xFFF3C300);
@@ -32,6 +37,42 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
     _setupAnimations();
+    _checkSavedSession(); // 🔥 Check if user is already logged in on startup
+  }
+
+  // 🔥 Auto-Login Logic
+  Future<void> _checkSavedSession() async {
+    try {
+      const storage = FlutterSecureStorage();
+      String? token = await storage.read(key: "jwt_token");
+      String? isPersistent = await storage.read(key: "is_persistent");
+
+      if (token != null && token.isNotEmpty) {
+        if (isPersistent == "true" || isPersistent == null) {
+          // Token exists and user wants to stay logged in -> Go straight to Dashboard
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const DashboardScreen()),
+            );
+            return; // Don't show login UI
+          }
+        } else {
+          // Token exists but user unticked "Keep me logged in" -> Clear session on fresh start
+          await storage.delete(key: "jwt_token");
+          await storage.delete(key: "user_data");
+        }
+      }
+    } catch (e) {
+      debugPrint("Session check error: $e");
+    }
+
+    // If no valid session, stop checking and show Login UI
+    if (mounted) {
+      setState(() {
+        _isCheckingSession = false;
+      });
+    }
   }
 
   void _setupAnimations() {
@@ -41,22 +82,15 @@ class _LoginScreenState extends State<LoginScreen>
     );
 
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-          parent: _animationController,
-          curve: const Interval(0.0, 0.6, curve: Curves.easeOut)),
+      CurvedAnimation(parent: _animationController, curve: const Interval(0.0, 0.6, curve: Curves.easeOut)),
     );
 
-    _slideAnimation =
-        Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
-      CurvedAnimation(
-          parent: _animationController,
-          curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic)),
+    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animationController, curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic)),
     );
 
     _buttonScaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-          parent: _animationController,
-          curve: const Interval(0.5, 1.0, curve: Curves.elasticOut)),
+      CurvedAnimation(parent: _animationController, curve: const Interval(0.5, 1.0, curve: Curves.elasticOut)),
     );
 
     _animationController.forward();
@@ -73,9 +107,7 @@ class _LoginScreenState extends State<LoginScreen>
   void _handleLogin() async {
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Please enter both email and password"),
-            backgroundColor: Colors.orange),
+        const SnackBar(content: Text("Please enter both email and password"), backgroundColor: Colors.orange),
       );
       return;
     }
@@ -89,34 +121,42 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (role != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Login Successful!"), backgroundColor: Colors.green),
+        const SnackBar(content: Text("Login Successful!"), backgroundColor: Colors.green),
       );
 
-      // 🔥 FIX: Everyone goes directly to DashboardScreen now!
-      // The Dashboard will automatically adapt to their role.
+      // 🔥 Save "Keep me logged in" preference
+      const storage = FlutterSecureStorage();
+      await storage.write(key: "is_persistent", value: _keepMeLoggedIn ? "true" : "false");
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const DashboardScreen()),
       );
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Login Failed. Check your credentials or network."),
-            backgroundColor: Colors.red),
+        const SnackBar(content: Text("Login Failed. Check your credentials or network."), backgroundColor: Colors.red),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 🔥 Show a blank screen with a loader while checking session to prevent visual flicker
+    if (_isCheckingSession) {
+      return Scaffold(
+        backgroundColor: backgroundGray,
+        body: Center(
+          child: CircularProgressIndicator(color: primaryYellow),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: backgroundGray,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 24.0, vertical: 40.0),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 40.0),
             child: FadeTransition(
               opacity: _fadeAnimation,
               child: SlideTransition(
@@ -146,22 +186,14 @@ class _LoginScreenState extends State<LoginScreen>
               color: navyBlue,
               shape: BoxShape.circle,
               boxShadow: [
-                BoxShadow(
-                    color: navyBlue.withOpacity(0.2),
-                    blurRadius: 15,
-                    offset: const Offset(0, 8))
+                BoxShadow(color: navyBlue.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))
               ]),
-          child: Icon(Icons.confirmation_number_outlined,
-              size: 48, color: primaryYellow),
+          child: Icon(Icons.confirmation_number_outlined, size: 48, color: primaryYellow),
         ),
         const SizedBox(height: 16),
         Text(
           "TicketDesk",
-          style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: navyBlue,
-              letterSpacing: 1.0),
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: navyBlue, letterSpacing: 1.0),
         ),
       ],
     );
@@ -174,30 +206,18 @@ class _LoginScreenState extends State<LoginScreen>
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 24, offset: const Offset(0, 10)),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Welcome back",
-              style: TextStyle(
-                  fontSize: 24, fontWeight: FontWeight.bold, color: navyBlue)),
+          Text("Welcome back", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: navyBlue)),
           const SizedBox(height: 8),
-          const Text("Sign in to your workspace.",
-              style: TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+          const Text("Sign in to your workspace.", style: TextStyle(fontSize: 14, color: Color(0xFF64748B))),
           const SizedBox(height: 32),
 
-          const Text("EMAIL ADDRESS",
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF94A3B8),
-                  letterSpacing: 0.5)),
+          const Text("EMAIL ADDRESS", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8), letterSpacing: 0.5)),
           const SizedBox(height: 8),
           _buildTextField(
             controller: _emailController,
@@ -208,12 +228,7 @@ class _LoginScreenState extends State<LoginScreen>
 
           const SizedBox(height: 24),
 
-          const Text("PASSWORD",
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF94A3B8),
-                  letterSpacing: 0.5)),
+          const Text("PASSWORD", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8), letterSpacing: 0.5)),
           const SizedBox(height: 8),
           _buildTextField(
             controller: _passwordController,
@@ -222,9 +237,36 @@ class _LoginScreenState extends State<LoginScreen>
             isPassword: true,
           ),
 
-          const SizedBox(
-              height:
-                  32), // Adjusted padding since 'Forgot Password' is removed
+          const SizedBox(height: 16),
+
+          // 🔥 New Keep me logged in Checkbox
+          Row(
+            children: [
+              SizedBox(
+                height: 24,
+                width: 24,
+                child: Checkbox(
+                  value: _keepMeLoggedIn,
+                  activeColor: primaryYellow,
+                  checkColor: navyBlue,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  side: BorderSide(color: Colors.grey.shade400, width: 1.5),
+                  onChanged: (val) {
+                    setState(() {
+                      _keepMeLoggedIn = val!;
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                  "Keep me logged in",
+                  style: TextStyle(fontSize: 13, color: navyBlue, fontWeight: FontWeight.w600)
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 32),
 
           _buildAnimatedLoginButton(),
         ],
@@ -256,15 +298,9 @@ class _LoginScreenState extends State<LoginScreen>
           prefixIcon: Icon(icon, color: const Color(0xFF94A3B8), size: 20),
           suffixIcon: isPassword
               ? IconButton(
-                  icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_off
-                          : Icons.visibility,
-                      color: const Color(0xFF94A3B8),
-                      size: 18),
-                  onPressed: () =>
-                      setState(() => _obscurePassword = !_obscurePassword),
-                )
+            icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: const Color(0xFF94A3B8), size: 18),
+            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+          )
               : null,
           border: InputBorder.none,
           focusedBorder: OutlineInputBorder(
@@ -302,8 +338,7 @@ class _LoginScreenState extends State<LoginScreen>
                 BoxShadow(
                   color: primaryYellow.withOpacity(_isButtonTapped ? 0.2 : 0.4),
                   blurRadius: _isButtonTapped ? 5 : 12,
-                  offset:
-                      _isButtonTapped ? const Offset(0, 2) : const Offset(0, 5),
+                  offset: _isButtonTapped ? const Offset(0, 2) : const Offset(0, 5),
                 ),
               ],
             ),
@@ -311,24 +346,18 @@ class _LoginScreenState extends State<LoginScreen>
               builder: (context, auth, child) {
                 return auth.isLoading
                     ? const Center(
-                        child: SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: CircularProgressIndicator(
-                                color: Color(0xFF1E293B), strokeWidth: 2.5)))
+                    child: SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: CircularProgressIndicator(color: Color(0xFF1E293B), strokeWidth: 2.5)))
                     : const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text("Sign In",
-                              style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1E293B))),
-                          SizedBox(width: 8),
-                          Icon(Icons.arrow_forward_rounded,
-                              size: 20, color: Color(0xFF1E293B)),
-                        ],
-                      );
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text("Sign In", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+                    SizedBox(width: 8),
+                    Icon(Icons.arrow_forward_rounded, size: 20, color: Color(0xFF1E293B)),
+                  ],
+                );
               },
             ),
           ),
