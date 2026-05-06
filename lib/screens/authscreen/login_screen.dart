@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart'; // 🔥 Imported for session check
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:dio/dio.dart'; // 🔥 Imported to verify token
 import '../../providers/auth_provider.dart';
+import '../constants/api_constants.dart'; // 🔥 Imported for Base URL
 import '../common/dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -18,16 +20,13 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   bool _obscurePassword = true;
   bool _isButtonTapped = false;
 
-  // 🔥 New State Variables
   bool _keepMeLoggedIn = true;
-  bool _isCheckingSession = true; // To prevent visual flicker while checking token
+  bool _isCheckingSession = true;
 
-  // Theme Colors - Unified Clean Palette
   final Color primaryYellow = const Color(0xFFF3C300);
   final Color navyBlue = const Color(0xFF1E293B);
   final Color backgroundGray = const Color(0xFFF1F5F9);
 
-  // Animation Controllers
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -37,10 +36,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   void initState() {
     super.initState();
     _setupAnimations();
-    _checkSavedSession(); // 🔥 Check if user is already logged in on startup
+    _checkSavedSession();
   }
 
-  // 🔥 Auto-Login Logic
+  // 🔥 Auto-Login Logic with Token Validation
+  // 🔥 Auto-Login Logic with Token Validation & Expiry Message
   Future<void> _checkSavedSession() async {
     try {
       const storage = FlutterSecureStorage();
@@ -49,16 +49,43 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
       if (token != null && token.isNotEmpty) {
         if (isPersistent == "true" || isPersistent == null) {
-          // Token exists and user wants to stay logged in -> Go straight to Dashboard
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const DashboardScreen()),
+
+          try {
+            final String baseUrl = ApiConstants.baseUrl;
+            // Hit a lightweight endpoint to check token validity
+            await Dio().get(
+                "$baseUrl/api/users/profile",
+                options: Options(headers: {"Authorization": "Bearer $token"})
             );
-            return; // Don't show login UI
+
+            // If it succeeds, token is valid! Go to Dashboard.
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => const DashboardScreen()),
+              );
+              return;
+            }
+          } catch (e) {
+            // 🔥 Token EXPIRED! Clear storage and SHOW ERROR MESSAGE
+            debugPrint("Token Expired. Clearing old session.");
+            await storage.delete(key: "jwt_token");
+            await storage.delete(key: "user_data");
+
+            // Show error message on Login Screen
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Session expired. Please log in again."),
+                    backgroundColor: Colors.orange,
+                    duration: Duration(seconds: 4),
+                  )
+              );
+            }
           }
+
         } else {
-          // Token exists but user unticked "Keep me logged in" -> Clear session on fresh start
+          // Token exists but user unticked "Keep me logged in" previously -> Clear it
           await storage.delete(key: "jwt_token");
           await storage.delete(key: "user_data");
         }
@@ -67,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       debugPrint("Session check error: $e");
     }
 
-    // If no valid session, stop checking and show Login UI
+    // If no valid session or token expired, show Login UI
     if (mounted) {
       setState(() {
         _isCheckingSession = false;
@@ -124,7 +151,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         const SnackBar(content: Text("Login Successful!"), backgroundColor: Colors.green),
       );
 
-      // 🔥 Save "Keep me logged in" preference
       const storage = FlutterSecureStorage();
       await storage.write(key: "is_persistent", value: _keepMeLoggedIn ? "true" : "false");
 
@@ -141,7 +167,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    // 🔥 Show a blank screen with a loader while checking session to prevent visual flicker
     if (_isCheckingSession) {
       return Scaffold(
         backgroundColor: backgroundGray,
@@ -239,7 +264,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
           const SizedBox(height: 16),
 
-          // 🔥 New Keep me logged in Checkbox
           Row(
             children: [
               SizedBox(

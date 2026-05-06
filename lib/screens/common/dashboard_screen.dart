@@ -14,7 +14,7 @@ import '../../widgets/menu_drawer.dart';
 import '../authscreen/login_screen.dart';
 import '../common/profile_screen.dart';
 import '../common/ticket_detail_screen.dart';
-import '../common/ticket_screen.dart'; // 🔥 Imported to navigate to Tickets Module
+import '../common/ticket_screen.dart';
 import '../constants/api_constants.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -36,19 +36,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Ticket> _allTickets = [];
   bool _isLoading = true;
 
-  // 🔥 STRICT MODULE & ACTION BASED PERMISSIONS
   bool _isAdmin = false;
-
   bool _canViewDashboard = true;
   bool _canViewUsers = false;
-
   bool _canViewAllTickets = false;
   bool _canViewOwnTickets = false;
   bool _canCreateTicket = false;
   bool _canUpdateTicket = false;
   bool _canDeleteTicket = false;
-
-  // Permissions for Create Ticket
   bool _canChangePriority = false;
   bool _canUploadAttachment = false;
 
@@ -61,6 +56,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _fetchUserProfileLocally();
+  }
+
+  // 🔥 NEW: Helper method to catch expired tokens and force logout
+  void _handleApiError(dynamic e) {
+    if (!mounted) return;
+    String errStr = e.toString().toLowerCase();
+
+    // If it's a 401 Unauthorized error (Token Expired)
+    if ((e is DioException && e.response?.statusCode == 401) || errStr.contains('401') || errStr.contains('unauthorized')) {
+      Provider.of<AuthProvider>(context, listen: false).logout();
+      Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+              (route) => false
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Session expired. Please log in again."), backgroundColor: Colors.orange)
+      );
+    }
   }
 
   Future<void> _fetchUserProfileLocally() async {
@@ -90,7 +104,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           String userRole = userData['role']?.toString().toLowerCase().trim() ?? '';
           _isAdmin = (userRole == 'admin' || userRole == 'super admin');
 
-          // Reset everything except Dashboard
           _canViewUsers = false;
           _canViewAllTickets = false;
           _canViewOwnTickets = false;
@@ -100,7 +113,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _canChangePriority = false;
           _canUploadAttachment = false;
 
-          // 🔥 PARSE PERMISSIONS DYNAMICALLY
           if (userData['permissions'] != null && userData['permissions'] is List) {
             for (var perm in userData['permissions']) {
               String res = perm['resource']?.toString().toLowerCase().trim() ?? '';
@@ -137,7 +149,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       const storage = FlutterSecureStorage();
       String? token = await storage.read(key: "jwt_token");
 
-      // Only fetch users if permitted
       if (_canViewUsers) {
         try {
           var usersRes = await Dio().get("$_baseUrl/api/users",
@@ -151,10 +162,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         } catch (e) {
           _totalUsers = 0;
+          _handleApiError(e); // 🔥 Added error handler
         }
       }
 
-      // Fetch and Filter Tickets based on access
       if (_hasAnyTicketViewAccess) {
         List<Ticket> tickets = [];
         try {
@@ -165,6 +176,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         } catch (e) {
           debugPrint("API Failed: $e");
+          _handleApiError(e); // 🔥 Added error handler
         }
 
         if (mounted) {
@@ -181,7 +193,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // Helper method to safely extract Ticket Number
   String _getDisplayTicketNumber(Ticket t) {
     try {
       var num = (t as dynamic).ticketNumber;
@@ -400,7 +411,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       iconTheme: const IconThemeData(color: Colors.white),
       title: const Text("Dashboard", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       actions: [
-        // IconButton(icon: const Icon(Icons.notifications_none, color: Colors.white), onPressed: () {}),
         _buildAvatarMenu(),
       ],
     );
@@ -485,7 +495,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (_hasAnyTicketViewAccess) {
         int totalT = _allTickets.length;
         int openT = _allTickets.where((t) => t.status.toLowerCase() == 'open').length;
-        int resolvedT = _allTickets.where((t) =>t.status.toLowerCase() == 'resolved').length;
+        int resolvedT = _allTickets.where((t) => t.status.toLowerCase() == 'closed' || t.status.toLowerCase() == 'resolved').length;
 
         String prefix = _canViewAllTickets ? "Total" : "My";
         String openPrefix = _canViewAllTickets ? "Open" : "My Open";
@@ -541,9 +551,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // =========================================================================
-  // 🔥 UPDATED RECENT TICKETS TABLE WITH 'VIEW ALL' AND DOT PILLS
-  // =========================================================================
   Widget _buildRecentTicketsTable(bool isDark) {
     Color cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     Color textColor = isDark ? Colors.white : Colors.black;
@@ -563,7 +570,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Text(tableTitle, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor)),
               TextButton(
                 onPressed: () {
-                  // Navigate directly to Tickets Module
                   Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const TicketsScreen()));
                 },
                 child: const Text("View All", style: TextStyle(color: Color(0xFFF3C300), fontWeight: FontWeight.bold)),
@@ -615,7 +621,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             )
                         ),
                         const SizedBox(width: 12),
-                        _buildDotPill(t.priority, isDark), // Show Priority on the right
+                        _buildDotPill(t.priority, isDark),
                       ],
                     ),
                   ),
@@ -627,20 +633,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Helper Widget for Web-Style Dot Pills (Status and Priority)
   Widget _buildDotPill(String text, bool isDark) {
     Color color; Color bgColor; String val = text.toLowerCase();
 
-    // Determine colors
     if (val == 'open' || val == 'high') { color = Colors.orange.shade700; bgColor = isDark ? Colors.orange.withOpacity(0.1) : Colors.orange.shade50; }
     else if (val.contains('progress') || val == 'medium') { color = Colors.blue.shade700; bgColor = isDark ? Colors.blue.withOpacity(0.1) : Colors.blue.shade50; }
     else if (val == 'critical') { color = Colors.red.shade700; bgColor = isDark ? Colors.red.withOpacity(0.1) : Colors.red.shade50; }
     else if (val == 'resolved' || val == 'low') { color = Colors.grey.shade700; bgColor = isDark ? Colors.white10 : Colors.grey.shade200; }
-    else { color = Colors.green.shade700; bgColor = isDark ? Colors.green.withOpacity(0.1) : Colors.green.shade50; } // closed/done
+    else { color = Colors.green.shade700; bgColor = isDark ? Colors.green.withOpacity(0.1) : Colors.green.shade50; }
 
-    // Specific match for "Medium" Indigo tone from screenshot
     if (val == 'medium') {
-      color = const Color(0xFF6366F1); // Indigo
+      color = const Color(0xFF6366F1);
       bgColor = isDark ? const Color(0xFF6366F1).withOpacity(0.1) : const Color(0xFFEEF2FF);
     }
 
