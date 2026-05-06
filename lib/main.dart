@@ -36,7 +36,7 @@ class MyApp extends StatelessWidget {
           darkTheme: ThemeData.dark(),
           theme: ThemeData.light(),
 
-          home: const LoginScreen(),
+          home: const SplashScreen(),
         );
       },
     );

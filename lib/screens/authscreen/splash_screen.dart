@@ -20,26 +20,17 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   void _checkUserStatus() async {
-    // 🔥 Now catches a String? role instead of a bool
     String? role = await _authService.verifyToken();
 
-    await Future.delayed(const Duration(seconds: 1));
+    await Future.delayed(const Duration(seconds: 3));
 
     if (!mounted) return;
 
     if (role != null) {
-      // 🔥 Route based on role
-      if (role == 'admin') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        );
-      }
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const DashboardScreen()),
+      );
     } else {
       Navigator.pushReplacement(
         context,
@@ -50,25 +41,15 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFFF3C300),
+    return Scaffold(
+      // backgroundColor: const Color(0xFFF3C300), // Primary Yellow
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.confirmation_number_outlined,
-                size: 80, color: Colors.black),
-            SizedBox(height: 16),
-            Text(
-              "TicketDesk",
-              style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black),
-            ),
-            SizedBox(height: 24),
-            CircularProgressIndicator(color: Colors.black),
-          ],
+
+        child: Image.asset(
+          'assets/icons/app_icon.png',
+          width: 200,
+          height: 200,
+          fit: BoxFit.contain,
         ),
       ),
     );
