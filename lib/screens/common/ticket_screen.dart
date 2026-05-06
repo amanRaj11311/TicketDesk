@@ -31,6 +31,12 @@ class _TicketsScreenState extends State<TicketsScreen> {
   List<Ticket> _displayedTickets = [];
   bool _isLoading = true;
 
+  // 🔥 PAGINATION VARIABLES
+  int _currentPage = 1;
+  bool _hasMoreData = true;
+  bool _isFetchingMore = false;
+  final ScrollController _scrollController = ScrollController();
+
   String _currentUserId = "";
 
   // 🔥 APP BAR USER PROFILE DATA
@@ -64,11 +70,32 @@ class _TicketsScreenState extends State<TicketsScreen> {
   @override
   void initState() {
     super.initState();
+    // 🔥 SCROLL LISTENER FOR PAGINATION
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 100 &&
+          !_isFetchingMore &&
+          _hasMoreData) {
+        _loadMoreTickets();
+      }
+    });
     _loadDataAndPermissions();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadDataAndPermissions() async {
-    if (mounted) setState(() => _isLoading = true);
+    if (mounted) setState(() {
+      _isLoading = true;
+      _currentPage = 1;
+      _hasMoreData = true;
+      _allTickets.clear();
+    });
+
     try {
       const storage = FlutterSecureStorage();
       String? token = await storage.read(key: "jwt_token");
@@ -135,7 +162,12 @@ class _TicketsScreenState extends State<TicketsScreen> {
         return;
       }
 
-      List<Ticket> fetchedTickets = await _ticketService.fetchTickets();
+      // 🔥 FETCH PAGE 1
+      List<Ticket> fetchedTickets = await _ticketService.fetchTickets(page: _currentPage, limit: 15);
+      if (fetchedTickets.length < 15) {
+        _hasMoreData = false;
+      }
+
       if (!_canViewAllTickets && _canViewOwnTickets) {
         fetchedTickets = fetchedTickets.where((t) => t.createdBy == _currentUserId).toList();
       }
@@ -159,6 +191,34 @@ class _TicketsScreenState extends State<TicketsScreen> {
       debugPrint("Error loading data: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // 🔥 LOAD MORE TICKETS (PAGINATION)
+  Future<void> _loadMoreTickets() async {
+    setState(() => _isFetchingMore = true);
+    try {
+      _currentPage++;
+      List<Ticket> fetchedTickets = await _ticketService.fetchTickets(page: _currentPage, limit: 15);
+
+      if (fetchedTickets.length < 15) {
+        _hasMoreData = false;
+      }
+
+      if (!_canViewAllTickets && _canViewOwnTickets) {
+        fetchedTickets = fetchedTickets.where((t) => t.createdBy == _currentUserId).toList();
+      }
+
+      if (mounted) {
+        setState(() {
+          _allTickets.addAll(fetchedTickets);
+          _applyFilters();
+          _isFetchingMore = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isFetchingMore = false);
+      debugPrint("Error loading more tickets: $e");
     }
   }
 
@@ -202,7 +262,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
 
       String creatorStr = creator.toString();
 
-      // Scanner: Extracts name even if it's a broken string like "{_id: 123, name: Aman Raj}"
       if (creatorStr.contains('name:')) {
         var match = RegExp(r'name:\s*([^,}]+)').firstMatch(creatorStr);
         if (match != null && match.group(1) != null) {
@@ -1069,6 +1128,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
         child: LayoutBuilder(
             builder: (context, constraints) {
               return SingleChildScrollView(
+                controller: _scrollController, // 🔥 PAGINATION SCROLLER
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
@@ -1196,7 +1256,16 @@ class _TicketsScreenState extends State<TicketsScreen> {
                             _buildMobileList(isDark, textColor, subTextColor, borderColor),
                         ],
                       ),
-                    )
+                    ),
+
+                    // 🔥 LOADING INDICATOR FOR NEXT PAGE
+                    if (_isFetchingMore)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20.0),
+                        child: Center(
+                          child: CircularProgressIndicator(color: Color(0xFFF3C300)),
+                        ),
+                      )
                   ],
                 ),
               );
@@ -1274,9 +1343,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
     );
   }
 
-  // =========================================================================
-  // 🔥 TABLE & CARDS
-  // =========================================================================
   Widget _buildDesktopTable(bool isDark, Color textColor, Color subTextColor, Color borderColor) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -1491,7 +1557,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
   Widget _buildAssigneeCell(Ticket t, Color textColor, bool isDark) {
     String assigneeName = _getAssigneeName(t);
 
-    // 🔥 Unassigned case
     if (assigneeName == "--") {
       return Padding(
         padding: const EdgeInsets.only(top: 2),
@@ -1506,7 +1571,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
       );
     }
 
-    // 🔥 Assigned case
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Align(

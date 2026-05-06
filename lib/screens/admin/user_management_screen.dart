@@ -8,7 +8,7 @@ import 'package:untitled13/widgets/menu_drawer.dart';
 
 import '../../constants/api_constants.dart';
 import '../../providers/theme_provider.dart';
-import '../common/profile_screen.dart'; // 🔥 Imported for Avatar Dropdown Menu
+import '../common/profile_screen.dart';
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -23,8 +23,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   List<dynamic> _allUsers = [];
   List<dynamic> _filteredUsers = [];
-  List<dynamic> _rolesList = []; // Dynamic Roles List
+  List<dynamic> _rolesList = [];
   bool _isLoading = true;
+
+  // 🔥 PAGINATION VARIABLES
+  int _currentPage = 1;
+  bool _hasMoreData = true;
+  bool _isFetchingMore = false;
+  final ScrollController _scrollController = ScrollController();
 
   // 🔥 APP BAR USER PROFILE DATA
   String _firstName = "User";
@@ -39,11 +45,32 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   @override
   void initState() {
     super.initState();
+    // 🔥 Listen to Scroll to load more data
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 100 &&
+          !_isFetchingMore &&
+          _hasMoreData) {
+        _loadMoreUsers();
+      }
+    });
     _loadDataAndPermissions();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadDataAndPermissions() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _currentPage = 1;
+      _hasMoreData = true;
+      _allUsers.clear();
+    });
+
     try {
       const storage = FlutterSecureStorage();
       String? token = await storage.read(key: "jwt_token");
@@ -53,7 +80,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       if (userDataString != null) {
         final userData = jsonDecode(userDataString);
 
-        // 🔥 Set App Bar User Profile
         String fullName = userData['name'] ?? 'User';
         List<String> nameParts = fullName.trim().split(RegExp(r'\s+'));
         _firstName = nameParts.isNotEmpty ? nameParts.first : 'User';
@@ -67,7 +93,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         }
         _profileImageUrl = userData['avatarUrl'] ?? userData['profileImage'] ?? userData['avatar'];
 
-        // Strict Permissions
         _canCreateUser = false;
         _canUpdateUser = false;
         _canDeleteUser = false;
@@ -104,16 +129,23 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         debugPrint("Failed to fetch roles from API: $e");
       }
 
-      // 3. FETCH USERS
+      // 3. FETCH USERS (PAGE 1)
       try {
         var userResponse = await Dio().get(
-          "$_baseUrl/api/users",
+          "$_baseUrl/api/users?page=$_currentPage&limit=15", // 🔥 Pagination added here
           options: Options(headers: {"Authorization": "Bearer $token"}),
         );
+
         if (userResponse.data is List) {
           _allUsers = userResponse.data;
+          _hasMoreData = false; // No meta, assume all fetched
         } else if (userResponse.data is Map) {
           _allUsers = userResponse.data['data'] ?? userResponse.data['users'] ?? [];
+          // Check Meta for more pages
+          if (userResponse.data['meta'] != null) {
+            int totalPages = userResponse.data['meta']['pages'] ?? 1;
+            _hasMoreData = _currentPage < totalPages;
+          }
         }
       } catch (e) {
         debugPrint("Failed to fetch users from API: $e");
@@ -126,6 +158,44 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     } catch (e) {
       setState(() => _isLoading = false);
       debugPrint("Critical Error fetching data: $e");
+    }
+  }
+
+  // 🔥 FETCH NEXT PAGE OF USERS
+  Future<void> _loadMoreUsers() async {
+    setState(() => _isFetchingMore = true);
+    try {
+      _currentPage++;
+      const storage = FlutterSecureStorage();
+      String? token = await storage.read(key: "jwt_token");
+
+      var userResponse = await Dio().get(
+        "$_baseUrl/api/users?page=$_currentPage&limit=15",
+        options: Options(headers: {"Authorization": "Bearer $token"}),
+      );
+
+      List<dynamic> newUsers = [];
+      if (userResponse.data is List) {
+        newUsers = userResponse.data;
+        _hasMoreData = false;
+      } else if (userResponse.data is Map) {
+        newUsers = userResponse.data['data'] ?? userResponse.data['users'] ?? [];
+        if (userResponse.data['meta'] != null) {
+          int totalPages = userResponse.data['meta']['pages'] ?? 1;
+          _hasMoreData = _currentPage < totalPages;
+        } else {
+          _hasMoreData = newUsers.isNotEmpty;
+        }
+      }
+
+      setState(() {
+        _allUsers.addAll(newUsers);
+        _filterUsers(_searchController.text); // Re-apply search filter
+        _isFetchingMore = false;
+      });
+    } catch (e) {
+      setState(() => _isFetchingMore = false);
+      debugPrint("Error loading more users: $e");
     }
   }
 
@@ -180,9 +250,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     return _allUsers.where((u) => _extractRoleName(u).toLowerCase().contains(targetRoleStr.toLowerCase())).length;
   }
 
-  // =========================================================================
-  // 🔥 CREATE / EDIT USER BOTTOM SHEET
-  // =========================================================================
   void _openCreateOrEditSheet({dynamic user}) {
     bool isNewUser = (user == null);
     String userId = isNewUser ? '' : (user['_id'] ?? user['id'] ?? '').toString();
@@ -253,7 +320,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 );
 
                 if (isNewUser) {
-                  // CREATE USER
                   Map<String, dynamic> payload = {
                     "name": nameCtrl.text.trim(),
                     "email": emailCtrl.text.trim(),
@@ -271,7 +337,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   );
 
                 } else {
-                  // UPDATE EXISTING USER (Info)
                   Map<String, dynamic> infoPayload = {
                     "name": nameCtrl.text.trim(),
                     "status": selectedStatus,
@@ -285,15 +350,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       options: requestOptions
                   );
 
-                  // 🔥 FIX: HITTING THE DEDICATED PASSWORD ROUTE SHOWN IN SWAGGER
                   if (passwordCtrl.text.isNotEmpty) {
                     Map<String, dynamic> passPayload = {
                       "newPassword": passwordCtrl.text,
-                      "password": passwordCtrl.text // Sending both to ensure API catches it
+                      "password": passwordCtrl.text
                     };
 
                     await Dio().patch(
-                        "$_baseUrl/api/users/$userId/password", // Exactly matching the swagger route
+                        "$_baseUrl/api/users/$userId/password",
                         data: jsonEncode(passPayload),
                         options: requestOptions
                     );
@@ -362,7 +426,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // 🔥 PASSWORD FIELD
                       _buildFormLabel(isNewUser ? "PASSWORD" : "NEW PASSWORD (Leave blank to keep unchanged)", isDark),
                       TextField(
                         controller: passwordCtrl,
@@ -384,7 +447,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         ),
                       ),
 
-                      // 🔥 STATUS FIELD
                       if (!isNewUser) ...[
                         const SizedBox(height: 20),
                         _buildFormLabel("STATUS", isDark),
@@ -556,6 +618,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         onRefresh: _loadDataAndPermissions,
         color: const Color(0xFF1E293B),
         child: SingleChildScrollView(
+          controller: _scrollController, // 🔥 PAGINATION SCROLL CONTROLLER ADDED HERE
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(20.0),
           child: Column(
@@ -614,6 +677,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   separatorBuilder: (context, index) => const SizedBox(height: 12),
                   itemBuilder: (context, index) => _buildUserCard(_filteredUsers[index], isDark, cardColor, textColor, borderColor),
                 ),
+
+              // 🔥 LOADING INDICATOR FOR PAGINATION AT THE BOTTOM
+              if (_isFetchingMore)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20.0),
+                  child: Center(
+                    child: CircularProgressIndicator(color: Color(0xFFF3C300)),
+                  ),
+                )
             ],
           ),
         ),

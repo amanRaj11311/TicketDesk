@@ -12,15 +12,15 @@ class TicketService {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   // ==========================================
-  // 1. FETCH TICKETS
+  // 1. FETCH TICKETS (🔥 PAGINATION ADDED)
   // ==========================================
-  Future<List<Ticket>> fetchTickets() async {
+  Future<List<Ticket>> fetchTickets({int page = 1, int limit = 15}) async {
     try {
       String? token = await _storage.read(key: "jwt_token");
       if (token == null) return [];
 
       var response = await _dio.get(
-        "${ApiConstants.baseUrl}/api/tickets",
+        "${ApiConstants.baseUrl}/api/tickets?page=$page&limit=$limit",
         options: Options(headers: {"Authorization": "Bearer $token"}),
       );
 
