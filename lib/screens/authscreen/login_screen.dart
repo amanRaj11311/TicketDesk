@@ -346,6 +346,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               builder: (context, auth, child) {
                 return auth.isLoading
                     ? const Center(
+
                     child: SizedBox(
                         height: 24,
                         width: 24,

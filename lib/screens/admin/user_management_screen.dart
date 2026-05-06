@@ -239,54 +239,73 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 const storage = FlutterSecureStorage();
                 String? token = await storage.read(key: "jwt_token");
 
-                // Get Role Name for User Creation
                 String roleNameToSend = 'user';
                 try {
                   var matchedRole = _rolesList.firstWhere((r) => (r['_id'] ?? r['id']).toString() == selectedRoleId);
                   roleNameToSend = (matchedRole['name'] ?? 'user').toString().toLowerCase();
                 } catch (_) {}
 
-                Map<String, dynamic> payload = {
-                  "name": nameCtrl.text.trim(),
-                };
+                Options requestOptions = Options(
+                    headers: {
+                      "Authorization": "Bearer $token",
+                      "Content-Type": "application/json"
+                    }
+                );
 
                 if (isNewUser) {
-                  // CREATE expects Role Name
-                  payload["email"] = emailCtrl.text.trim();
-                  payload["password"] = passwordCtrl.text;
-                  payload["role"] = roleNameToSend;
+                  // CREATE USER
+                  Map<String, dynamic> payload = {
+                    "name": nameCtrl.text.trim(),
+                    "email": emailCtrl.text.trim(),
+                    "password": passwordCtrl.text,
+                    "role": roleNameToSend,
+                  };
                   if (phoneCtrl.text.trim().isNotEmpty) {
                     payload["phone"] = phoneCtrl.text.trim();
                   }
-                } else {
-                  // EDIT expects Role ID array
-                  payload["status"] = selectedStatus;
-                  payload["roleIds"] = [selectedRoleId];
-                  payload["role"] = selectedRoleId;
-                }
 
-                Response response;
-                if (!isNewUser) {
-                  response = await Dio().patch(
-                      "$_baseUrl/api/users/$userId",
-                      data: payload,
-                      options: Options(headers: {"Authorization": "Bearer $token"})
-                  );
-                } else {
-                  response = await Dio().post(
+                  await Dio().post(
                       "$_baseUrl/api/users",
-                      data: payload,
-                      options: Options(headers: {"Authorization": "Bearer $token"})
+                      data: jsonEncode(payload),
+                      options: requestOptions
                   );
+
+                } else {
+                  // UPDATE EXISTING USER (Info)
+                  Map<String, dynamic> infoPayload = {
+                    "name": nameCtrl.text.trim(),
+                    "status": selectedStatus,
+                    "roleIds": [selectedRoleId],
+                    "role": selectedRoleId,
+                  };
+
+                  await Dio().patch(
+                      "$_baseUrl/api/users/$userId",
+                      data: jsonEncode(infoPayload),
+                      options: requestOptions
+                  );
+
+                  // 🔥 FIX: HITTING THE DEDICATED PASSWORD ROUTE SHOWN IN SWAGGER
+                  if (passwordCtrl.text.isNotEmpty) {
+                    Map<String, dynamic> passPayload = {
+                      "newPassword": passwordCtrl.text,
+                      "password": passwordCtrl.text // Sending both to ensure API catches it
+                    };
+
+                    await Dio().patch(
+                        "$_baseUrl/api/users/$userId/password", // Exactly matching the swagger route
+                        data: jsonEncode(passPayload),
+                        options: requestOptions
+                    );
+                  }
                 }
 
                 if (!context.mounted) return;
 
-                if (response.statusCode == 200 || response.statusCode == 201) {
-                  Navigator.pop(context);
-                  _loadDataAndPermissions();
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isNewUser ? "User Created Successfully!" : "User Updated Successfully!"), backgroundColor: Colors.green));
-                }
+                Navigator.pop(context);
+                _loadDataAndPermissions();
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isNewUser ? "User Created Successfully!" : "User Updated Successfully!"), backgroundColor: Colors.green));
+
               } catch (e) {
                 setModalState(() => isSubmitting = false);
                 String errorMsg = "Failed to process request.";
@@ -343,28 +362,31 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      if (isNewUser) ...[
-                        _buildFormLabel("PASSWORD", isDark),
-                        TextField(
-                          controller: passwordCtrl,
-                          obscureText: obscurePassword,
-                          style: TextStyle(color: textColor),
-                          decoration: InputDecoration(
-                            hintText: "••••••••",
-                            hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.grey.shade400, fontWeight: FontWeight.w400),
-                            filled: true, fillColor: inputColor,
-                            prefixIcon: Icon(Icons.lock_outline, size: 20, color: isDark ? Colors.white54 : Colors.grey),
-                            suffixIcon: IconButton(
-                              icon: Icon(obscurePassword ? Icons.visibility_off : Icons.visibility, color: isDark ? Colors.white54 : Colors.grey, size: 18),
-                              onPressed: () => setModalState(() => obscurePassword = !obscurePassword),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: borderColor)),
-                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: borderColor)),
-                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFF3C300), width: 2)),
+                      // 🔥 PASSWORD FIELD
+                      _buildFormLabel(isNewUser ? "PASSWORD" : "NEW PASSWORD (Leave blank to keep unchanged)", isDark),
+                      TextField(
+                        controller: passwordCtrl,
+                        obscureText: obscurePassword,
+                        style: TextStyle(color: textColor),
+                        decoration: InputDecoration(
+                          hintText: isNewUser ? "••••••••" : "Leave blank to keep current password",
+                          hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.grey.shade400, fontWeight: FontWeight.w400, fontSize: 13),
+                          filled: true, fillColor: inputColor,
+                          prefixIcon: Icon(Icons.lock_outline, size: 20, color: isDark ? Colors.white54 : Colors.grey),
+                          suffixIcon: IconButton(
+                            icon: Icon(obscurePassword ? Icons.visibility_off : Icons.visibility, color: isDark ? Colors.white54 : Colors.grey, size: 18),
+                            onPressed: () => setModalState(() => obscurePassword = !obscurePassword),
                           ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: borderColor)),
+                          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: borderColor)),
+                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFF3C300), width: 2)),
                         ),
-                      ] else ...[
+                      ),
+
+                      // 🔥 STATUS FIELD
+                      if (!isNewUser) ...[
+                        const SizedBox(height: 20),
                         _buildFormLabel("STATUS", isDark),
                         DropdownButtonFormField<String>(
                           value: selectedStatus,
@@ -463,9 +485,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     }
   }
 
-  // =========================================================================
-  // 🔥 BUILD GLOBAL APP BAR WITH AVATAR & DARK MODE TOGGLE
-  // =========================================================================
   PreferredSizeWidget _buildModernAppBar() {
     return AppBar(
       backgroundColor: const Color(0xFF1E293B),
@@ -473,7 +492,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       iconTheme: const IconThemeData(color: Colors.white),
       title: const Text("Users", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
       actions: [
-        // IconButton(icon: const Icon(Icons.notifications_none, color: Colors.white), onPressed: () {}),
         _buildAvatarMenu(),
       ],
     );
@@ -497,7 +515,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(children: [Icon(themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode, size: 20), const SizedBox(width: 10), const Text("Dark Mode")]),
+              Row(children: [Icon(themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode, size: 20), const SizedBox(width: 10), Text(themeProvider.isDarkMode ? "Light Mode" : "Dark Mode")]),
             ],
           ),
         ),
@@ -531,7 +549,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     return Scaffold(
       backgroundColor: bgColor,
       drawer: const MenuDrawer(currentRoute: "users"),
-      appBar: _buildModernAppBar(), // 🔥 Global App Bar Added
+      appBar: _buildModernAppBar(),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFFF3C300)))
           : RefreshIndicator(

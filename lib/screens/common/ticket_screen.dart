@@ -13,7 +13,7 @@ import '../../services/ticket_service.dart';
 import '../../widgets/menu_drawer.dart';
 import '../../providers/theme_provider.dart';
 import '../constants/api_constants.dart';
-import '../common/profile_screen.dart'; // 🔥 Imported for Avatar Dropdown
+import '../common/profile_screen.dart';
 
 class TicketsScreen extends StatefulWidget {
   const TicketsScreen({super.key});
@@ -78,7 +78,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
         final userData = jsonDecode(userDataString);
         _currentUserId = (userData['_id'] ?? userData['id'] ?? '').toString();
 
-        // 🔥 Parse App Bar Profile Data
         String fullName = userData['name'] ?? 'User';
         List<String> nameParts = fullName.trim().split(RegExp(r'\s+'));
 
@@ -193,8 +192,63 @@ class _TicketsScreenState extends State<TicketsScreen> {
     return "TKT-${t.id.substring(t.id.length - 4)}";
   }
 
+  // 🔥 BULLETPROOF SCANNER FOR CREATOR NAME
+  String _getCreatorName(Ticket t) {
+    try {
+      var creator = (t as dynamic).createdBy;
+      if (creator == null || creator.toString() == "null") return "--";
+
+      if (creator is Map) return creator['name']?.toString() ?? "--";
+
+      String creatorStr = creator.toString();
+
+      // Scanner: Extracts name even if it's a broken string like "{_id: 123, name: Aman Raj}"
+      if (creatorStr.contains('name:')) {
+        var match = RegExp(r'name:\s*([^,}]+)').firstMatch(creatorStr);
+        if (match != null && match.group(1) != null) {
+          String name = match.group(1)!.replaceAll('"', '').replaceAll("'", '').trim();
+          if (name.isNotEmpty) return name;
+        }
+      }
+
+      var foundUser = _usersList.firstWhere((u) => u['_id'] == creatorStr || u['id'] == creatorStr, orElse: () => null);
+      if (foundUser != null && foundUser['name'] != null) return foundUser['name'].toString();
+
+    } catch (e) {
+      debugPrint("Creator parse error: $e");
+    }
+    return "--";
+  }
+
+  // 🔥 BULLETPROOF SCANNER FOR ASSIGNEE NAME
+  String _getAssigneeName(Ticket t) {
+    try {
+      var assignee = (t as dynamic).assignedTo;
+      if (assignee == null || assignee.toString() == "null") return "--";
+
+      if (assignee is Map) return assignee['name']?.toString() ?? "--";
+
+      String assigneeStr = assignee.toString();
+
+      if (assigneeStr.contains('name:')) {
+        var match = RegExp(r'name:\s*([^,}]+)').firstMatch(assigneeStr);
+        if (match != null && match.group(1) != null) {
+          String name = match.group(1)!.replaceAll('"', '').replaceAll("'", '').trim();
+          if (name.isNotEmpty) return name;
+        }
+      }
+
+      var foundUser = _usersList.firstWhere((u) => u['_id'] == assigneeStr || u['id'] == assigneeStr, orElse: () => null);
+      if (foundUser != null && foundUser['name'] != null) return foundUser['name'].toString();
+
+    } catch (e) {
+      debugPrint("Assignee parse error: $e");
+    }
+    return "--";
+  }
+
   // =========================================================================
-  // 🔥 CUSTOM OVERLAY MESSAGE TO SHOW ON TOP OF MODALS/DIALOGS
+  // 🔥 CUSTOM OVERLAY MESSAGE
   // =========================================================================
   void _showOverlayMsg(BuildContext context, String msg, Color color) {
     final overlay = Overlay.of(context);
@@ -832,7 +886,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
   }
 
   // =========================================================================
-  // 🔥 UPDATED: IMAGE VIEWER DIALOG WITH DIRECT DOWNLOAD (NO CHROME)
+  // 🔥 IMAGE VIEWER DIALOG WITH DIRECT DOWNLOAD (NO CHROME)
   // =========================================================================
   Future<void> _downloadFile(String url) async {
     String fullUrl = url.startsWith('http') ? url : "$_baseUrl$url";
@@ -842,22 +896,18 @@ class _TicketsScreenState extends State<TicketsScreen> {
         _showOverlayMsg(context, "Downloading image... Please wait.", Colors.blue);
       }
 
-      // 1. Fetch image bytes securely
       var response = await Dio().get(fullUrl, options: Options(responseType: ResponseType.bytes));
 
-      // 2. Format File Name
       String fileName = fullUrl.split('/').last.split('?').first;
       if (!fileName.contains('.')) fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
 
-      // 3. Define Android Public Download Folder Path
       String savePath;
       if (Platform.isAndroid) {
         savePath = "/storage/emulated/0/Download/$fileName";
       } else {
-        savePath = "${Directory.systemTemp.path}/$fileName"; // Fallback for iOS
+        savePath = "${Directory.systemTemp.path}/$fileName";
       }
 
-      // 4. Save the file
       File file = File(savePath);
       await file.writeAsBytes(response.data);
 
@@ -867,7 +917,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
     } catch (e) {
       debugPrint("Download Error: $e");
 
-      // Fallback: If Storage permission fails or directory is inaccessible, open in browser as a last resort
       final Uri uri = Uri.parse(fullUrl);
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         if (mounted) _showOverlayMsg(context, "Failed to download image.", Colors.red);
@@ -935,7 +984,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
       iconTheme: const IconThemeData(color: Colors.white),
       title: const Text("Tickets", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
       actions: [
-        // IconButton(icon: const Icon(Icons.notifications_none, color: Colors.white), onPressed: () {}),
         _buildAvatarMenu(),
       ],
     );
@@ -1240,9 +1288,15 @@ class _TicketsScreenState extends State<TicketsScreen> {
             decoration: BoxDecoration(color: isDark ? Colors.white10 : Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
             child: Row(
                 children: [
-                  _headerCell("ID", 80, subTextColor), _headerCell("SUBJECT", 220, subTextColor), _headerCell("STATUS", 120, subTextColor),
-                  _headerCell("PRIORITY", 120, subTextColor), _headerCell("ASSIGNED TO", 160, subTextColor), _headerCell("FILES", 150, subTextColor),
-                  _headerCell("CREATED", 110, subTextColor), _headerCell("ACTIONS", 250, subTextColor),
+                  _headerCell("ID", 80, subTextColor),
+                  _headerCell("SUBJECT", 220, subTextColor),
+                  _headerCell("STATUS", 120, subTextColor),
+                  _headerCell("PRIORITY", 120, subTextColor),
+                  if (_canViewAllTickets) _headerCell("CREATED BY", 150, subTextColor),
+                  _headerCell("ASSIGNED TO", 160, subTextColor),
+                  _headerCell("FILES", 150, subTextColor),
+                  _headerCell("CREATED", 110, subTextColor),
+                  _headerCell("ACTIONS", 250, subTextColor),
                 ]
             ),
           ),
@@ -1269,6 +1323,17 @@ class _TicketsScreenState extends State<TicketsScreen> {
           SizedBox(width: 220, child: Text(t.title, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textColor), overflow: TextOverflow.ellipsis)),
           SizedBox(width: 120, child: Align(alignment: Alignment.centerLeft, child: _buildPremiumDotPill(t.status, isDark))),
           SizedBox(width: 120, child: Align(alignment: Alignment.centerLeft, child: _buildPremiumDotPill(t.priority, isDark))),
+
+          if (_canViewAllTickets)
+            SizedBox(
+                width: 150,
+                child: Text(
+                    _getCreatorName(t),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor),
+                    overflow: TextOverflow.ellipsis
+                )
+            ),
+
           SizedBox(width: 160, child: _buildAssigneeCell(t, textColor, isDark)),
           SizedBox(width: 150, child: _buildAttachmentRow(t, subTextColor, isDark)),
           SizedBox(width: 110, child: Text(dateStr, style: TextStyle(fontSize: 11, color: subTextColor, fontWeight: FontWeight.w500))),
@@ -1302,6 +1367,17 @@ class _TicketsScreenState extends State<TicketsScreen> {
               const SizedBox(height: 10),
 
               Text(t.title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textColor)),
+
+              if (_canViewAllTickets) ...[
+                const SizedBox(height: 6),
+                Row(
+                    children: [
+                      Icon(Icons.person_outline, size: 14, color: subTextColor),
+                      const SizedBox(width: 4),
+                      Text("By: ${_getCreatorName(t)}", style: TextStyle(fontSize: 12, color: subTextColor)),
+                    ]
+                )
+              ],
               const SizedBox(height: 10),
 
               Container(
@@ -1409,30 +1485,50 @@ class _TicketsScreenState extends State<TicketsScreen> {
         ],
       ),
     );
+
   }
 
   Widget _buildAssigneeCell(Ticket t, Color textColor, bool isDark) {
-    String assigneeName = "--";
+    String assigneeName = _getAssigneeName(t);
 
-    if (t.assignedTo != null && t.assignedTo.toString() != "null") {
-      try {
-        if (t.assignedTo is Map) {
-          assigneeName = t.assignedTo['name'] ?? "--";
-        } else {
-          try { assigneeName = (t.assignedTo as dynamic).name; } catch(_) {}
-          if (assigneeName == "--") assigneeName = t.assignedTo.toString();
-        }
-      } catch(e) {
-        assigneeName = t.assignedTo.toString();
-      }
+    // 🔥 Unassigned case
+    if (assigneeName == "--") {
+      return Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(
+          "Unassigned",
+          style: TextStyle(
+            fontSize: 12,
+            color: isDark ? Colors.white54 : Colors.grey.shade500,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      );
     }
 
-    if (assigneeName == "--") return Text("-- Unassigned --", style: TextStyle(color: isDark ? Colors.white54 : Colors.grey.shade400, fontSize: 11, fontStyle: FontStyle.italic));
-
-    return Row(children: [
-      Container(width: 20, height: 20, decoration: BoxDecoration(color: const Color(0xFFF3C300), borderRadius: BorderRadius.circular(4)), child: Center(child: Text(assigneeName[0].toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.black87)))),
-      const SizedBox(width: 6), Expanded(child: Text(assigneeName, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor), overflow: TextOverflow.ellipsis))
-    ]);
+    // 🔥 Assigned case
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal:3, vertical: 1),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3C300),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            "Assigned: $assigneeName",
+            style: const TextStyle(
+              fontSize: 11
+              ,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildActionsRow(Ticket t, bool isDark, Color borderColor) {
@@ -1458,7 +1554,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
                 final reasonCtrl = TextEditingController();
                 showDialog(
                     context: context,
-                    builder: (dialogContext) => AlertDialog( // 🔥 Using dialogContext to prevent shadowing
+                    builder: (dialogContext) => AlertDialog(
                       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       title: const Row(children: [Icon(Icons.warning_amber_rounded, color: Colors.red), SizedBox(width: 8), Text("Delete Ticket", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16))]),
