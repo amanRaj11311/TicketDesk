@@ -1,9 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:dio/dio.dart'; // 🔥 Imported to verify token
 import '../../providers/auth_provider.dart';
-import '../constants/api_constants.dart'; // 🔥 Imported for Base URL
+import '../constants/api_constants.dart';
 import '../common/dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -39,8 +39,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     _checkSavedSession();
   }
 
-  // 🔥 Auto-Login Logic with Token Validation
-  // 🔥 Auto-Login Logic with Token Validation & Expiry Message
+  // 🔥 Auto-Login Logic (FIXED)
   Future<void> _checkSavedSession() async {
     try {
       const storage = FlutterSecureStorage();
@@ -50,38 +49,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       if (token != null && token.isNotEmpty) {
         if (isPersistent == "true" || isPersistent == null) {
 
-          try {
-            final String baseUrl = ApiConstants.baseUrl;
-            // Hit a lightweight endpoint to check token validity
-            await Dio().get(
-                "$baseUrl/api/users/profile",
-                options: Options(headers: {"Authorization": "Bearer $token"})
+          // 🔥 FIX: Trust the token and go directly to Dashboard.
+          // If it is ACTUALLY expired (after 7 days), the DashboardScreen's
+          // _handleApiError will catch the 401 error and send them back here!
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const DashboardScreen()),
             );
-
-            // If it succeeds, token is valid! Go to Dashboard.
-            if (mounted) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const DashboardScreen()),
-              );
-              return;
-            }
-          } catch (e) {
-            // 🔥 Token EXPIRED! Clear storage and SHOW ERROR MESSAGE
-            debugPrint("Token Expired. Clearing old session.");
-            await storage.delete(key: "jwt_token");
-            await storage.delete(key: "user_data");
-
-            // Show error message on Login Screen
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Session expired. Please log in again."),
-                    backgroundColor: Colors.orange,
-                    duration: Duration(seconds: 4),
-                  )
-              );
-            }
+            return;
           }
 
         } else {
@@ -94,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       debugPrint("Session check error: $e");
     }
 
-    // If no valid session or token expired, show Login UI
+    // If no valid session, show Login UI
     if (mounted) {
       setState(() {
         _isCheckingSession = false;
