@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart'; // 🔥 YE IMPORT ZAROORI HAI
 
 import 'providers/auth_provider.dart';
-import 'providers/theme_provider.dart'; // 🔥 Import path fix kar diya hai
+import 'providers/theme_provider.dart';
 import 'screens/authscreen/login_screen.dart';
 import 'screens/authscreen/splash_screen.dart';
 
-
 void main() {
+  // 🔥 NATIVE SPLASH KO ROKNE KE LIYE YE 2 LINES ADD KAREIN
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+
   runApp(
     MultiProvider(
       providers: [
@@ -29,13 +33,9 @@ class MyApp extends StatelessWidget {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'TMS App',
-
-          // 🔥 Magic Happens Here
-          themeMode:
-              themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+          themeMode: themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
           darkTheme: ThemeData.dark(),
           theme: ThemeData.light(),
-
           home: const SplashScreen(),
         );
       },

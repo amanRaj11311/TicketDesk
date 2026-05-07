@@ -30,17 +30,19 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icons/app_icon.png
+    - assets/icons/Splash.png
 
-# 👇 MUST be outside flutter
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icons/app_icon.png"
 
-# 👇 Splash screen config here
 flutter_native_splash:
-  color: "#F3C300"
-  image: "assets/icons/app_icon.png"
+  color: "#FFFFFF"
+
+
   android_12:
-    color: "#F3C300"
-    image: "assets/icons/app_icon.png"
+    color: "#FFFFFF"
+
+
+    fullscreen: true
