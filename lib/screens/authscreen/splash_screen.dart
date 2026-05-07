@@ -21,7 +21,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   void _checkUserStatus() async {
-    // 1. Native splash (Yellow color) turant hata do kyunki Flutter ki screen aa gayi hai
+
     FlutterNativeSplash.remove();
 
     // 2. Token verify karo
@@ -49,14 +49,14 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF3C300),
+      backgroundColor: const Color(0xFFFFF8E1),
       body: SizedBox(
         width: double.infinity,
         height: double.infinity,
-        // 🔥 BoxFit.cover ensures ki aapki image screen ke hisaab se perfect fit ho bina stretch hue
+
         child: Image.asset(
-          'assets/icons/Splash.png',
-          fit: BoxFit.cover,
+          'assets/icons/app_icon.png',
+            fit: BoxFit.contain
         ),
       ),
     );
