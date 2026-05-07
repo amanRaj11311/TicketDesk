@@ -177,7 +177,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
       _kpiTotal = kpiTickets.length;
       _kpiOpen = kpiTickets.where((t) => t.status.toLowerCase() == 'open').length;
       _kpiInProgress = kpiTickets.where((t) => t.status.toLowerCase().contains('progress')).length;
-      _kpiClosed = kpiTickets.where((t) => t.status.toLowerCase() == 'closed' || t.status.toLowerCase() == 'resolved').length;
+      _kpiClosed = kpiTickets.where((t) => t.status.toLowerCase() == 'closed').length;
 
 
       // 🔥 FETCH PAGE 1 FOR LIST VIEW

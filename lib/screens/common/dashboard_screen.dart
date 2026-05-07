@@ -19,7 +19,7 @@ import '../constants/api_constants.dart';
 
 
 import '../admin/user_management_screen.dart';
- import '../admin/teams_screen.dart';
+import '../admin/teams_screen.dart';
 import '../admin/roles_screen.dart';
 import '../admin/permissions_screen.dart';
 
@@ -188,7 +188,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (_hasAnyTicketViewAccess) {
         List<Ticket> tickets = [];
         try {
-          tickets = await _ticketService.fetchTickets();
+          // 🔥 FIX: ADDED page: 1, limit: 10000 TO FETCH ALL TICKETS FOR EXACT KPI COUNT
+          tickets = await _ticketService.fetchTickets(page: 1, limit: 10000);
 
           if (!_canViewAllTickets && _canViewOwnTickets) {
             tickets = tickets.where((t) => t.createdBy == _currentUserId).toList();
@@ -256,19 +257,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _buildQuickNavItem(context, "Tickets", Icons.confirmation_number_outlined, Colors.orange, const TicketsScreen(), isDark),
 
                   if (_canViewTeams)
-                  // TODO: Replace Placeholder with actual TeamsScreen()
                     _buildQuickNavItem(context, "Teams", Icons.dashboard_customize_outlined, Colors.blue, const TeamsScreen(), isDark),
 
                   if (_canViewUsers)
-                  // TODO: Replace Placeholder with actual UserManagementScreen()
                     _buildQuickNavItem(context, "Users", Icons.people_alt_outlined, Colors.green, const UserManagementScreen(), isDark),
 
                   if (_canViewRoles)
-                  // TODO: Replace Placeholder with actual RolesScreen()
                     _buildQuickNavItem(context, "Roles", Icons.badge_outlined, Colors.purple, const RolesScreen(), isDark),
 
                   if (_canViewPerms)
-                  // TODO: Replace Placeholder with actual PermissionsScreen()
                     _buildQuickNavItem(context, "Permissions", Icons.security_outlined, Colors.red, const PermissionsScreen(), isDark),
                 ],
               ),
@@ -427,7 +424,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
         ),
-        // 🔥 REMOVED NEW TICKET BUTTON FROM HERE
       ],
     );
   }
@@ -446,7 +442,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (_hasAnyTicketViewAccess) {
         int totalT = _allTickets.length;
         int openT = _allTickets.where((t) => t.status.toLowerCase() == 'open').length;
-        int resolvedT = _allTickets.where((t) => t.status.toLowerCase() == 'closed' || t.status.toLowerCase() == 'resolved').length;
+        int resolvedT = _allTickets.where((t) => t.status.toLowerCase() == 'resolved').length;
 
         String prefix = _canViewAllTickets ? "Total" : "My";
         String openPrefix = _canViewAllTickets ? "Open" : "My Open";
