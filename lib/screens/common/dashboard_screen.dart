@@ -14,8 +14,14 @@ import '../../widgets/menu_drawer.dart';
 import '../authscreen/login_screen.dart';
 import '../common/profile_screen.dart';
 import '../common/ticket_detail_screen.dart';
-import '../common/ticket_screen.dart';
+import '../common/ticket_screen.dart'; // TicketsScreen import
 import '../constants/api_constants.dart';
+
+
+import '../admin/user_management_screen.dart';
+ import '../admin/teams_screen.dart';
+import '../admin/roles_screen.dart';
+import '../admin/permissions_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -38,9 +44,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   bool _isAdmin = false;
   bool _canViewDashboard = true;
+
+  // 🔥 PERMISSION FLAGS FOR NAVIGATION
   bool _canViewUsers = false;
   bool _canViewAllTickets = false;
   bool _canViewOwnTickets = false;
+  bool _canViewTeams = false;
+  bool _canViewRoles = false;
+  bool _canViewPerms = false;
+
   bool _canCreateTicket = false;
   bool _canUpdateTicket = false;
   bool _canDeleteTicket = false;
@@ -58,12 +70,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _fetchUserProfileLocally();
   }
 
-  // 🔥 NEW: Helper method to catch expired tokens and force logout
   void _handleApiError(dynamic e) {
     if (!mounted) return;
     String errStr = e.toString().toLowerCase();
 
-    // If it's a 401 Unauthorized error (Token Expired)
     if ((e is DioException && e.response?.statusCode == 401) || errStr.contains('401') || errStr.contains('unauthorized')) {
       Provider.of<AuthProvider>(context, listen: false).logout();
       Navigator.pushAndRemoveUntil(
@@ -104,9 +114,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           String userRole = userData['role']?.toString().toLowerCase().trim() ?? '';
           _isAdmin = (userRole == 'admin' || userRole == 'super admin');
 
+          // RESET FLAGS
           _canViewUsers = false;
+          _canViewTeams = false;
+          _canViewRoles = false;
+          _canViewPerms = false;
           _canViewAllTickets = false;
           _canViewOwnTickets = false;
+
           _canCreateTicket = false;
           _canUpdateTicket = false;
           _canDeleteTicket = false;
@@ -118,7 +133,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               String res = perm['resource']?.toString().toLowerCase().trim() ?? '';
               String act = perm['action']?.toString().toLowerCase().trim() ?? '';
 
-              if (res == 'user' && act == 'view') _canViewUsers = true;
+              // 🔥 NAVIGATION VIEW PERMISSIONS LOGIC
+              if (res == 'user' && (act == 'view' || act == 'view_all' || act == 'view_own')) _canViewUsers = true;
+              if (res == 'team' && (act == 'view' || act == 'view_all' || act == 'view_own')) _canViewTeams = true;
+              if (res == 'role' && (act == 'view' || act == 'view_all' || act == 'view_own')) _canViewRoles = true;
+              if (res == 'permission' && (act == 'view' || act == 'view_all' || act == 'view_own')) _canViewPerms = true;
 
               if (res == 'ticket') {
                 if (act == 'view' || act == 'view_all') _canViewAllTickets = true;
@@ -162,7 +181,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         } catch (e) {
           _totalUsers = 0;
-          _handleApiError(e); // 🔥 Added error handler
+          _handleApiError(e);
         }
       }
 
@@ -176,7 +195,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         } catch (e) {
           debugPrint("API Failed: $e");
-          _handleApiError(e); // 🔥 Added error handler
+          _handleApiError(e);
         }
 
         if (mounted) {
@@ -203,156 +222,90 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // =========================================================================
-  // 🔥 CREATE TICKET BOTTOM SHEET
+  // 🔥 QUICK NAVIGATION BOTTOM SHEET MENU
   // =========================================================================
-  void _openCreateTicketBottomSheet() {
-    final titleController = TextEditingController();
-    final descriptionController = TextEditingController();
-    String localPriority = 'low';
-    File? localImage;
-    bool isSubmitting = false;
-
+  void _openQuickNavigationMenu() {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (BuildContext context) {
+      builder: (context) {
         final isDark = Provider.of<ThemeProvider>(context).isDarkMode;
         final bgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-        final inputColor = isDark ? const Color(0xFF121212) : const Color(0xFFF8FAFC);
-        final textColor = isDark ? Colors.white : Colors.black;
-        final labelColor = isDark ? Colors.grey.shade400 : const Color(0xFF64748B);
+        final textColor = isDark ? Colors.white : const Color(0xFF1E293B);
 
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 40, height: 5, margin: const EdgeInsets.only(bottom: 20), decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+              Text("Quick Navigation", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor)),
+              const SizedBox(height: 24),
 
-            Future<void> pickImage() async {
-              final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
-              if (pickedFile != null) {
-                setModalState(() => localImage = File(pickedFile.path));
-              }
-            }
+              // 🔥 DYNAMIC MENU OPTIONS BASED ON PERMISSIONS
+              Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                alignment: WrapAlignment.center,
+                children: [
+                  if (_hasAnyTicketViewAccess)
+                    _buildQuickNavItem(context, "Tickets", Icons.confirmation_number_outlined, Colors.orange, const TicketsScreen(), isDark),
 
-            Future<void> submitForm() async {
-              if (titleController.text.trim().isEmpty || descriptionController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please fill all required fields"), backgroundColor: Colors.orange));
-                return;
-              }
+                  if (_canViewTeams)
+                  // TODO: Replace Placeholder with actual TeamsScreen()
+                    _buildQuickNavItem(context, "Teams", Icons.dashboard_customize_outlined, Colors.blue, const TeamsScreen(), isDark),
 
-              setModalState(() => isSubmitting = true);
+                  if (_canViewUsers)
+                  // TODO: Replace Placeholder with actual UserManagementScreen()
+                    _buildQuickNavItem(context, "Users", Icons.people_alt_outlined, Colors.green, const UserManagementScreen(), isDark),
 
-              int statusCode = await _ticketService.createTicket(
-                titleController.text.trim(),
-                descriptionController.text.trim(),
-                localPriority,
-                localImage,
-              );
+                  if (_canViewRoles)
+                  // TODO: Replace Placeholder with actual RolesScreen()
+                    _buildQuickNavItem(context, "Roles", Icons.badge_outlined, Colors.purple, const RolesScreen(), isDark),
 
-              if (!context.mounted) return;
-
-              if (statusCode == 201 || statusCode == 200) {
-                Navigator.pop(context);
-                _loadDashboardData();
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ticket Created Successfully!"), backgroundColor: Colors.green));
-              } else if (statusCode == 401) {
-                Navigator.pop(context);
-                Provider.of<AuthProvider>(context, listen: false).logout();
-                Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const LoginScreen()), (route) => false);
-              } else {
-                setModalState(() => isSubmitting = false);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Failed to create ticket. Server Error."), backgroundColor: Colors.red));
-              }
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-              child: Container(
-                padding: const EdgeInsets.all(24.0),
-                decoration: BoxDecoration(color: bgColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(child: Container(width: 40, height: 5, margin: const EdgeInsets.only(bottom: 20), decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)))),
-                      Text("Create New Ticket", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor)),
-                      const SizedBox(height: 20),
-
-                      Text("SUBJECT / TITLE", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: labelColor)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: titleController,
-                        style: TextStyle(color: textColor),
-                        decoration: InputDecoration(hintText: "E.g., Internet is down", hintStyle: const TextStyle(color: Colors.grey), filled: true, fillColor: inputColor, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                      ),
-                      const SizedBox(height: 20),
-
-                      Text("DESCRIPTION", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: labelColor)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: descriptionController,
-                        maxLines: 3,
-                        style: TextStyle(color: textColor),
-                        decoration: InputDecoration(hintText: "Describe the issue in detail...", hintStyle: const TextStyle(color: Colors.grey), filled: true, fillColor: inputColor, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                      ),
-                      const SizedBox(height: 20),
-
-                      if (_canChangePriority) ...[
-                        Text("PRIORITY", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: labelColor)),
-                        const SizedBox(height: 8),
-                        DropdownButtonFormField<String>(
-                          value: localPriority,
-                          dropdownColor: inputColor,
-                          style: TextStyle(color: textColor, fontSize: 14),
-                          decoration: InputDecoration(filled: true, fillColor: inputColor, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                          items: ['low', 'medium', 'high', 'critical'].map((String value) => DropdownMenuItem(value: value, child: Text(value.toUpperCase()))).toList(),
-                          onChanged: (val) => setModalState(() => localPriority = val!),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
-
-                      if (_canUploadAttachment) ...[
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(color: inputColor, borderRadius: BorderRadius.circular(12)),
-                          child: Row(
-                            children: [
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(backgroundColor: isDark ? Colors.blue.withOpacity(0.2) : const Color(0xFFEFF6FF), foregroundColor: isDark ? Colors.blue : const Color(0xFF1E293B), elevation: 0),
-                                onPressed: pickImage,
-                                icon: const Icon(Icons.add_photo_alternate_outlined),
-                                label: const Text("Attach Photo"),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(child: Text(localImage != null ? "✅ Image attached" : "No image selected", style: TextStyle(color: localImage != null ? Colors.green : Colors.grey, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                      ] else ...[
-                        const SizedBox(height: 10),
-                      ],
-
-                      SizedBox(
-                        width: double.infinity, height: 50,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                          onPressed: isSubmitting ? null : submitForm,
-                          child: isSubmitting
-                              ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : const Text("Submit Ticket", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                        ),
-                      )
-                    ],
-                  ),
-                ),
+                  if (_canViewPerms)
+                  // TODO: Replace Placeholder with actual PermissionsScreen()
+                    _buildQuickNavItem(context, "Permissions", Icons.security_outlined, Colors.red, const PermissionsScreen(), isDark),
+                ],
               ),
-            );
-          },
+              const SizedBox(height: 20),
+            ],
+          ),
         );
       },
     );
   }
+
+  Widget _buildQuickNavItem(BuildContext context, String title, IconData icon, Color color, Widget targetScreen, bool isDark) {
+    return InkWell(
+      onTap: () {
+        Navigator.pop(context); // Close bottom sheet
+        Navigator.push(context, MaterialPageRoute(builder: (context) => targetScreen));
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 100,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isDark ? color.withOpacity(0.1) : color.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(title, textAlign: TextAlign.center, style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -362,6 +315,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFF9FAFB),
       drawer: const MenuDrawer(currentRoute: 'dashboard'),
       appBar: _buildModernAppBar(),
+
+      // 🔥 NEW: FLOATING ACTION BUTTON
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: const Color(0xFFF3C300),
+        onPressed: _openQuickNavigationMenu,
+        elevation: 4,
+        child: const Icon(Icons.grid_view_rounded, color: Colors.black, size: 28),
+      ),
+
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFFF3C300)))
           : RefreshIndicator(
@@ -465,18 +427,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
         ),
-        if (_canCreateTicket)
-          ElevatedButton.icon(
-            onPressed: _openCreateTicketBottomSheet,
-            icon: const Icon(Icons.add, size: 18, color: Colors.black),
-            label: const Text("New Ticket", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF3C300),
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            ),
-          ),
+        // 🔥 REMOVED NEW TICKET BUTTON FROM HERE
       ],
     );
   }

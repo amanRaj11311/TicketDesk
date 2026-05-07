@@ -26,14 +26,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   List<dynamic> _rolesList = [];
   bool _isLoading = true;
 
-  // 🔥 PAGINATION VARIABLES
+  // 🔥 PAGINATION VARIABLES (Fixed missing variables)
   int _currentPage = 1;
   bool _hasMoreData = true;
   bool _isFetchingMore = false;
   final ScrollController _scrollController = ScrollController();
 
   // 🔥 APP BAR USER PROFILE DATA
-  String _firstName = "User";
   String _initials = "U";
   String? _profileImageUrl;
 
@@ -64,12 +63,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   }
 
   Future<void> _loadDataAndPermissions() async {
-    setState(() {
-      _isLoading = true;
-      _currentPage = 1;
-      _hasMoreData = true;
-      _allUsers.clear();
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _currentPage = 1;
+        _hasMoreData = true;
+        _allUsers.clear();
+      });
+    }
 
     try {
       const storage = FlutterSecureStorage();
@@ -82,7 +83,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
         String fullName = userData['name'] ?? 'User';
         List<String> nameParts = fullName.trim().split(RegExp(r'\s+'));
-        _firstName = nameParts.isNotEmpty ? nameParts.first : 'User';
 
         if (nameParts.length > 1 && nameParts[1].isNotEmpty) {
           _initials = nameParts[0][0].toUpperCase() + nameParts[1][0].toUpperCase();
@@ -132,16 +132,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       // 3. FETCH USERS (PAGE 1)
       try {
         var userResponse = await Dio().get(
-          "$_baseUrl/api/users?page=$_currentPage&limit=15", // 🔥 Pagination added here
+          "$_baseUrl/api/users?page=$_currentPage&limit=15",
           options: Options(headers: {"Authorization": "Bearer $token"}),
         );
 
         if (userResponse.data is List) {
           _allUsers = userResponse.data;
-          _hasMoreData = false; // No meta, assume all fetched
+          _hasMoreData = false;
         } else if (userResponse.data is Map) {
           _allUsers = userResponse.data['data'] ?? userResponse.data['users'] ?? [];
-          // Check Meta for more pages
           if (userResponse.data['meta'] != null) {
             int totalPages = userResponse.data['meta']['pages'] ?? 1;
             _hasMoreData = _currentPage < totalPages;
@@ -151,12 +150,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         debugPrint("Failed to fetch users from API: $e");
       }
 
-      setState(() {
-        _filteredUsers = _allUsers;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _filteredUsers = _allUsers;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       debugPrint("Critical Error fetching data: $e");
     }
   }
@@ -188,13 +189,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         }
       }
 
-      setState(() {
-        _allUsers.addAll(newUsers);
-        _filterUsers(_searchController.text); // Re-apply search filter
-        _isFetchingMore = false;
-      });
+      if (mounted) {
+        setState(() {
+          _allUsers.addAll(newUsers);
+          _filterUsers(_searchController.text);
+          _isFetchingMore = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isFetchingMore = false);
+      if (mounted) setState(() => _isFetchingMore = false);
       debugPrint("Error loading more users: $e");
     }
   }
@@ -291,12 +294,36 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           builder: (BuildContext context, StateSetter setModalState) {
 
             Future<void> submitForm() async {
-              if (nameCtrl.text.trim().isEmpty || selectedRoleId == null) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Name & Role are required!"), backgroundColor: Colors.orange));
+              String email = emailCtrl.text.trim();
+
+              final emailRegex = RegExp(
+                r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]+$',
+              );
+
+              if (nameCtrl.text.trim().isEmpty ||
+                  email.isEmpty ||
+                  selectedRoleId == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Name, Email & Role are required!"),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
                 return;
               }
-              if (isNewUser && (emailCtrl.text.trim().isEmpty || passwordCtrl.text.isEmpty)) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Email & Password required for new user!"), backgroundColor: Colors.orange));
+
+// 🔥 Email validation
+              if (!emailRegex.hasMatch(email)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Please enter a valid email address"),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              if (isNewUser && passwordCtrl.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Password required for new user!"), backgroundColor: Colors.orange));
                 return;
               }
 
@@ -339,10 +366,14 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 } else {
                   Map<String, dynamic> infoPayload = {
                     "name": nameCtrl.text.trim(),
+                    "email": emailCtrl.text.trim(),
                     "status": selectedStatus,
                     "roleIds": [selectedRoleId],
                     "role": selectedRoleId,
                   };
+                  if (phoneCtrl.text.trim().isNotEmpty) {
+                    infoPayload["phone"] = phoneCtrl.text.trim();
+                  }
 
                   await Dio().patch(
                       "$_baseUrl/api/users/$userId",
@@ -364,6 +395,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   }
                 }
 
+                // 🔥 Fix: Async Gap Warning Solved here
                 if (!context.mounted) return;
 
                 Navigator.pop(context);
@@ -376,6 +408,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 if (e is DioException && e.response != null) {
                   errorMsg = e.response?.data['message'] ?? e.response?.data.toString() ?? errorMsg;
                 }
+
+                // 🔥 Fix: Async Gap Warning
+                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $errorMsg"), backgroundColor: Colors.red));
               }
             }
@@ -398,15 +433,40 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       TextField(controller: nameCtrl, style: TextStyle(color: textColor), decoration: _buildInputDecoration("e.g. John Doe", Icons.person_outline, inputColor, borderColor, isDark)),
                       const SizedBox(height: 20),
 
-                      if (isNewUser) ...[
-                        _buildFormLabel("EMAIL ADDRESS", isDark),
-                        TextField(controller: emailCtrl, style: TextStyle(color: textColor), keyboardType: TextInputType.emailAddress, decoration: _buildInputDecoration("name@company.com", Icons.email_outlined, inputColor, borderColor, isDark)),
-                        const SizedBox(height: 20),
+                      _buildFormLabel("EMAIL ADDRESS", isDark),
+                      TextFormField(
+                        controller: emailCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Email is required';
+                          }
 
-                        _buildFormLabel("PHONE NUMBER (Optional)", isDark),
-                        TextField(controller: phoneCtrl, style: TextStyle(color: textColor), keyboardType: TextInputType.phone, decoration: _buildInputDecoration("+1 (555) 000-0000", Icons.phone_outlined, inputColor, borderColor, isDark)),
-                        const SizedBox(height: 20),
-                      ],
+                          final emailRegex = RegExp(
+                            r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]+$',
+                          );
+
+                          if (!emailRegex.hasMatch(value.trim())) {
+                            return 'Enter valid email';
+                          }
+
+                          return null;
+                        },
+                        style: TextStyle(color: textColor),
+                        decoration: _buildInputDecoration(
+                          "name@company.com",
+                          Icons.email_outlined,
+                          inputColor,
+                          borderColor,
+                          isDark,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      _buildFormLabel("PHONE NUMBER (Optional)", isDark),
+                      TextField(controller: phoneCtrl, style: TextStyle(color: textColor), keyboardType: TextInputType.phone, decoration: _buildInputDecoration("+1 (555) 000-0000", Icons.phone_outlined, inputColor, borderColor, isDark)),
+                      const SizedBox(height: 20),
 
                       _buildFormLabel("ROLE", isDark),
                       DropdownButtonFormField<String?>(
@@ -539,9 +599,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         options: Options(headers: {"Authorization": "Bearer $token"}),
       );
 
+      // 🔥 Fix: Async Gap Warning
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("User deleted successfully."), backgroundColor: Colors.green));
       _loadDataAndPermissions();
     } catch (e) {
+      // 🔥 Fix: Async Gap Warning
+      if (!mounted) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error deleting user"), backgroundColor: Colors.red));
     }
@@ -618,7 +682,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         onRefresh: _loadDataAndPermissions,
         color: const Color(0xFF1E293B),
         child: SingleChildScrollView(
-          controller: _scrollController, // 🔥 PAGINATION SCROLL CONTROLLER ADDED HERE
+          controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(20.0),
           child: Column(
@@ -678,7 +742,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   itemBuilder: (context, index) => _buildUserCard(_filteredUsers[index], isDark, cardColor, textColor, borderColor),
                 ),
 
-              // 🔥 LOADING INDICATOR FOR PAGINATION AT THE BOTTOM
               if (_isFetchingMore)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 20.0),

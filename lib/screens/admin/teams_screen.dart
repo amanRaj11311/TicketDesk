@@ -96,11 +96,12 @@ class _TeamsScreenState extends State<TeamsScreen> {
 
       Options options = Options(headers: {"Authorization": "Bearer $token"});
 
-      // 2. FETCH TEAMS, USERS AND TICKETS (MANUAL COUNT)
+      // 2. FETCH TEAMS, USERS AND TICKETS
       final responses = await Future.wait([
         Dio().get("$_baseUrl/api/teams", options: options).catchError((e) => Response(requestOptions: RequestOptions(path: ''))),
         Dio().get("$_baseUrl/api/users", options: options).catchError((e) => Response(requestOptions: RequestOptions(path: ''))),
-        Dio().get("$_baseUrl/api/tickets", options: options).catchError((e) => Response(requestOptions: RequestOptions(path: ''))),
+        // 🔥 FIX 1: ADDED ?limit=10000 so it fetches ALL tickets for an accurate count, not just Page 1
+        Dio().get("$_baseUrl/api/tickets?limit=10000", options: options).catchError((e) => Response(requestOptions: RequestOptions(path: ''))),
       ]);
 
       var teamsData = responses[0].data;
@@ -112,7 +113,7 @@ class _TeamsScreenState extends State<TeamsScreen> {
       if (teamsData is Map) parsedTeams = teamsData['data'] ?? teamsData['teams'] ?? teamsData['docs'] ?? [];
       else if (teamsData is List) parsedTeams = teamsData;
 
-      // 🔥 FIX: FETCH MEMBERS FOR ALL TEAMS TO UPDATE CARDS CORRECTLY (N+1 Fetch)
+      // FETCH MEMBERS FOR ALL TEAMS TO UPDATE CARDS CORRECTLY (N+1 Fetch)
       List<Future<Response>> memberRequests = [];
       for (var t in parsedTeams) {
         String tId = (t['_id'] ?? t['id']).toString();
@@ -148,15 +149,19 @@ class _TeamsScreenState extends State<TeamsScreen> {
         if (usersData is Map) _users = usersData['data'] ?? usersData['users'] ?? usersData['docs'] ?? [];
         else if (usersData is List) _users = usersData;
 
-        // 🔥 FIX: PRECISE MANUAL TICKET COUNT LIKE TICKETS SCREEN
         List<dynamic> parsedTickets = [];
         if (ticketsData is Map) parsedTickets = ticketsData['data'] ?? ticketsData['tickets'] ?? ticketsData['docs'] ?? [];
         else if (ticketsData is List) parsedTickets = ticketsData;
 
-        _openTicketsCount = parsedTickets.where((t) => (t['status'] ?? '').toString().toLowerCase() == 'open').length;
+        // 🔥 FIX 2: EXACTLY MATCHING THE TICKETS SCREEN LOGIC
+        _openTicketsCount = parsedTickets.where((t) {
+          String s = (t['status'] ?? '').toString().trim().toLowerCase();
+          return s == 'open'; // Changed from contains to strict equality
+        }).length;
+
         _resolvedTicketsCount = parsedTickets.where((t) {
-          String s = (t['status'] ?? '').toString().toLowerCase();
-          return s == 'resolved';
+          String s = (t['status'] ?? '').toString().trim().toLowerCase();
+          return s == 'resolved' || s == 'closed'; // Added closed to match exact logic
         }).length;
 
         _filteredTeams = _allTeams;
@@ -905,7 +910,7 @@ class _TeamsScreenState extends State<TeamsScreen> {
           _buildPremiumKPICard("Total Teams", "$teams", Icons.dashboard_customize_outlined, cardWidth, isDark),
           _buildPremiumKPICard("Total Users", "$users", Icons.people_alt_outlined, cardWidth, isDark),
           _buildPremiumKPICard("Open Tickets", "$open", Icons.folder_open_outlined, cardWidth, isDark),
-          _buildPremiumKPICard("Resolved", "$resolved", Icons.check_circle_outline, cardWidth, isDark),
+          _buildPremiumKPICard("Closed", "$resolved", Icons.check_circle_outline, cardWidth, isDark),
         ],
       );
     });
@@ -928,7 +933,7 @@ class _TeamsScreenState extends State<TeamsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(title, style: TextStyle(color: isDark ? Colors.white70 : Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text(title, style: TextStyle(color: isDark ? Colors.white54 : Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 6),
                     Text(val, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF1E293B))),
                   ],
@@ -981,7 +986,6 @@ class _TeamsScreenState extends State<TeamsScreen> {
     );
   }
 
-  // 🔥 CLEAN UI: EXACTLY LIKE THE VIDEO WITH FETCHED DATA
   Widget _buildTeamCard(dynamic team, bool isDark, Color cardColor, Color textColor, Color subTextColor, Color borderColor, Color bgColor) {
     String teamId = (team['_id'] ?? team['id']).toString();
     String name = team['name'] ?? 'Unnamed Team';

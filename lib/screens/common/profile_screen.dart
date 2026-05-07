@@ -97,8 +97,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // 🔥 UPDATE PROFILE INFO (Exact Swagger Route: PATCH /users/profile)
   // ====================================================================
   Future<void> _updateProfileInfo() async {
-    if (_nameController.text.trim().isEmpty || _emailController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Name and Email cannot be empty"), backgroundColor: Colors.orange));
+    String email = _emailController.text.trim();
+
+    final emailRegex = RegExp(
+      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]+$',
+    );
+
+    if (_nameController.text.trim().isEmpty || email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Name and Email cannot be empty"),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+// 🔥 Email validation
+    if (!emailRegex.hasMatch(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please enter a valid email address"),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
 
@@ -464,23 +486,79 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, letterSpacing: 0.5)),
         const SizedBox(height: 8),
-        TextField(
+        TextFormField(
           controller: controller,
           obscureText: obscureText,
           onChanged: onChanged,
           keyboardType: keyboardType,
-          style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w500),
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          validator: (value) {
+
+            // 🔥 Email validation only for email field
+            if (label.toLowerCase().contains("email")) {
+
+              if (value == null || value.trim().isEmpty) {
+                return "Email is required";
+              }
+
+              final emailRegex = RegExp(
+                r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]+$',
+              );
+
+              if (!emailRegex.hasMatch(value.trim())) {
+                return "Enter valid email";
+              }
+            }
+
+            // 🔥 Password confirm validation
+            if (label.toLowerCase().contains("confirm")) {
+              if (value != _newPasswordController.text) {
+                return "Passwords do not match";
+              }
+            }
+
+            return null;
+          },
+          style: TextStyle(
+            color: textColor,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.grey.shade400, fontSize: 14),
+            hintStyle: TextStyle(
+              color: isDark ? Colors.white30 : Colors.grey.shade400,
+              fontSize: 14,
+            ),
             filled: true,
             fillColor: fillColor,
             errorText: errorText,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: borderColor)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFF3C300), width: 1.5)),
-            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.red)),
-            focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.red, width: 1.5)),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: borderColor),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                color: Color(0xFFF3C300),
+                width: 1.5,
+              ),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Colors.red),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                color: Colors.red,
+                width: 1.5,
+              ),
+            ),
           ),
         ),
       ],

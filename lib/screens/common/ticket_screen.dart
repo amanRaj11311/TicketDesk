@@ -37,6 +37,12 @@ class _TicketsScreenState extends State<TicketsScreen> {
   bool _isFetchingMore = false;
   final ScrollController _scrollController = ScrollController();
 
+  // 🔥 KPI VARIABLES (Independent of Scroll/Pagination)
+  int _kpiTotal = 0;
+  int _kpiOpen = 0;
+  int _kpiInProgress = 0;
+  int _kpiClosed = 0;
+
   String _currentUserId = "";
 
   // 🔥 APP BAR USER PROFILE DATA
@@ -162,7 +168,19 @@ class _TicketsScreenState extends State<TicketsScreen> {
         return;
       }
 
-      // 🔥 FETCH PAGE 1
+      // 🔥 KPI EXACT COUNT FETCH (Limit=10000 sirf count ke liye)
+      List<Ticket> kpiTickets = await _ticketService.fetchTickets(page: 1, limit: 10000);
+      if (!_canViewAllTickets && _canViewOwnTickets) {
+        kpiTickets = kpiTickets.where((t) => t.createdBy == _currentUserId).toList();
+      }
+
+      _kpiTotal = kpiTickets.length;
+      _kpiOpen = kpiTickets.where((t) => t.status.toLowerCase() == 'open').length;
+      _kpiInProgress = kpiTickets.where((t) => t.status.toLowerCase().contains('progress')).length;
+      _kpiClosed = kpiTickets.where((t) => t.status.toLowerCase() == 'closed' || t.status.toLowerCase() == 'resolved').length;
+
+
+      // 🔥 FETCH PAGE 1 FOR LIST VIEW
       List<Ticket> fetchedTickets = await _ticketService.fetchTickets(page: _currentPage, limit: 15);
       if (fetchedTickets.length < 15) {
         _hasMoreData = false;
@@ -529,7 +547,8 @@ class _TicketsScreenState extends State<TicketsScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      if (isNewTicket || _canAssignTicket) ...[
+                      // 🔥 FIX: Now strictly checks if user has permission to assign
+                      if (_canAssignTicket) ...[
                         _buildFormLabel("ASSIGN TO", isDark),
                         DropdownButtonFormField<String?>(
                           value: _usersList.any((u) => u['_id'] == localAssignee) ? localAssignee : null,
@@ -1285,10 +1304,10 @@ class _TicketsScreenState extends State<TicketsScreen> {
         spacing: 16,
         runSpacing: 16,
         children: [
-          _buildPremiumKPICard(prefix, "$total", Icons.confirmation_number_outlined, cardWidth, isDark),
-          _buildPremiumKPICard("Open", "$open", Icons.folder_open, cardWidth, isDark),
-          _buildPremiumKPICard("In Progress", "$progress", Icons.rotate_right, cardWidth, isDark),
-          _buildPremiumKPICard("Closed", "$closed", Icons.check_circle_outline, cardWidth, isDark),
+          _buildPremiumKPICard(prefix, "$_kpiTotal", Icons.confirmation_number_outlined, cardWidth, isDark),
+          _buildPremiumKPICard("Open", "$_kpiOpen", Icons.folder_open, cardWidth, isDark),
+          _buildPremiumKPICard("In Progress", "$_kpiInProgress", Icons.rotate_right, cardWidth, isDark),
+          _buildPremiumKPICard("Closed", "$_kpiClosed", Icons.check_circle_outline, cardWidth, isDark),
         ],
       );
     });
