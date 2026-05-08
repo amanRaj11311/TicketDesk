@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async'; // 🔥 IMPORTED FOR LIVE CHAT TIMER
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -547,7 +548,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // 🔥 FIX: Now strictly checks if user has permission to assign
                       if (_canAssignTicket) ...[
                         _buildFormLabel("ASSIGN TO", isDark),
                         DropdownButtonFormField<String?>(
@@ -686,7 +686,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
   }
 
   // =========================================================================
-  // 🔥 FETCH & SHOW COMMENTS
+  // 🔥 FETCH & SHOW COMMENTS (LIVE CHAT ADDED)
   // =========================================================================
   void _openCommentsModal(Ticket ticket) {
     final commentController = TextEditingController();
@@ -694,6 +694,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
     bool isSending = false;
     List<dynamic> comments = [];
     File? commentImage;
+    Timer? chatTimer; // 🔥 ADDED TIMER VARIABLE FOR LIVE SYNC
 
     String displayTicketId = _getDisplayTicketNumber(ticket);
 
@@ -710,7 +711,9 @@ class _TicketsScreenState extends State<TicketsScreen> {
 
           return StatefulBuilder(
               builder: (BuildContext context, StateSetter setModalState) {
-                void fetchComments() async {
+
+                // 🔥 Added isBackground flag so loading spinner doesn't flash every 2 secs
+                void fetchComments({bool isBackground = false}) async {
                   try {
                     const storage = FlutterSecureStorage();
                     String? token = await storage.read(key: "jwt_token");
@@ -720,15 +723,22 @@ class _TicketsScreenState extends State<TicketsScreen> {
                       setModalState(() {
                         List rawList = res.data['data'] ?? res.data ?? [];
                         comments = List.from(rawList.reversed);
-                        isLoadingComments = false;
+                        if (!isBackground) isLoadingComments = false; // Hide initial loader
                       });
                     }
                   } catch (e) {
-                    setModalState(() => isLoadingComments = false);
+                    if (!isBackground) setModalState(() => isLoadingComments = false);
                   }
                 }
 
-                if (isLoadingComments && comments.isEmpty) fetchComments();
+                // Initial fetch & Timer start
+                if (isLoadingComments && comments.isEmpty) {
+                  fetchComments();
+                  // 🔥 START LIVE CHAT SYNC EVERY 2.5 SECONDS
+                  chatTimer ??= Timer.periodic(const Duration(milliseconds: 1500), (timer) {
+                    fetchComments(isBackground: true);
+                  });
+                }
 
                 Future<void> sendComment() async {
                   if (commentController.text.trim().isEmpty && commentImage == null) return;
@@ -753,7 +763,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
                     if (res.statusCode == 200 || res.statusCode == 201) {
                       commentController.clear();
                       commentImage = null;
-                      fetchComments();
+                      fetchComments(isBackground: true); // 🔥 Instantly fetch silently after sending
                     }
                   } catch (e) {
                     _showOverlayMsg(context, "Failed to send comment", Colors.red);
@@ -960,7 +970,10 @@ class _TicketsScreenState extends State<TicketsScreen> {
               }
           );
         }
-    );
+    ).whenComplete(() {
+      // 🔥 KILL TIMER WHEN CHAT MODAL IS CLOSED
+      chatTimer?.cancel();
+    });
   }
 
   // =========================================================================
