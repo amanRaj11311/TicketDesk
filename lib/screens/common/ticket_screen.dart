@@ -1615,7 +1615,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
   }
 
   Widget _buildActionsRow(Ticket t, bool isDark, Color borderColor) {
-    bool isClosed = t.status.toLowerCase() == 'closed' || t.status.toLowerCase() == 'resolved';
+    bool isClosed = t.status.toLowerCase() == 'closed' ;
 
     return Wrap(
       spacing: 6,
