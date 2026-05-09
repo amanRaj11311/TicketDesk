@@ -282,12 +282,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       itemBuilder: (context) => [
         PopupMenuItem(
-          value: 'theme',
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(children: [Icon(themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode, size: 20), const SizedBox(width: 10), const Text("Dark Mode")]),
-            ],
+          enabled: false,
+          child: StatefulBuilder(
+            builder: (context, menuSetState) {
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        themeProvider.isDarkMode
+                            ? Icons.dark_mode
+                            : Icons.light_mode,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        themeProvider.isDarkMode
+                            ? "Dark Mode"
+                            : "Light Mode",
+                      ),
+                    ],
+                  ),
+
+                  Switch(
+                    value: themeProvider.isDarkMode,
+                    activeColor: const Color(0xFFF3C300),
+                    onChanged: (value) {
+                      themeProvider.toggleTheme();
+
+                      menuSetState(() {});
+                      setState(() {});
+                    },
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ],

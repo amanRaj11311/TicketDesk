@@ -1091,15 +1091,45 @@ class _TicketsScreenState extends State<TicketsScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       itemBuilder: (context) => [
         const PopupMenuItem(value: 'profile', child: Row(children: [Icon(Icons.person_outline, size: 20), SizedBox(width: 10), Text("Profile")])),
-        PopupMenuItem(
-          value: 'theme',
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(children: [Icon(themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode, size: 20), const SizedBox(width: 10), const Text("Dark Mode")]),
-            ],
-          ),
-        ),
+    PopupMenuItem(
+    enabled: false,
+    child: StatefulBuilder(
+    builder: (context, menuSetState) {
+    return Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+    Row(
+    children: [
+    Icon(
+    themeProvider.isDarkMode
+    ? Icons.dark_mode
+        : Icons.light_mode,
+    size: 20,
+    ),
+    const SizedBox(width: 10),
+    Text(
+    themeProvider.isDarkMode
+    ? "Dark Mode"
+        : "Light Mode",
+    ),
+    ],
+    ),
+
+    Switch(
+    value: themeProvider.isDarkMode,
+    activeColor: const Color(0xFFF3C300),
+    onChanged: (value) {
+    themeProvider.toggleTheme();
+
+    menuSetState(() {});
+    setState(() {});
+    },
+    ),
+    ],
+    );
+    },
+    ),
+    ),
       ],
       child: Padding(
         padding: const EdgeInsets.only(right: 12, left: 4),

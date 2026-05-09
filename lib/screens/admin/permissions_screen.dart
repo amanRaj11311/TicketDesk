@@ -296,12 +296,42 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       itemBuilder: (context) => [
         const PopupMenuItem(value: 'profile', child: Row(children: [Icon(Icons.person_outline, size: 20), SizedBox(width: 10), Text("Profile")])),
         PopupMenuItem(
-          value: 'theme',
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(children: [Icon(themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode, size: 20), const SizedBox(width: 10), const Text("Dark Mode")]),
-            ],
+          enabled: false,
+          child: StatefulBuilder(
+            builder: (context, menuSetState) {
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        themeProvider.isDarkMode
+                            ? Icons.dark_mode
+                            : Icons.light_mode,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        themeProvider.isDarkMode
+                            ? "Dark Mode"
+                            : "Light Mode",
+                      ),
+                    ],
+                  ),
+
+                  Switch(
+                    value: themeProvider.isDarkMode,
+                    activeColor: primaryYellow,
+                    onChanged: (value) {
+                      themeProvider.toggleTheme();
+
+                      menuSetState(() {});
+                      setState(() {});
+                    },
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ],
